@@ -1,0 +1,31 @@
+# Arduino IDE & build outputs
+build/
+build_cli/
+*.elf
+*.bin
+*.map
+*.hex
+
+# Local configurations / credentials
+wifi_config.h
+*.local.h
+
+# Operating System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor & IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node / tests
+node_modules/
+package-lock.json
+
+# Temporary & logs
+*.log
+*.tmp
+*.bak
