@@ -42,7 +42,7 @@ This project is an independent firmware enhancement derived from [yousifamanuel/
    - CPU Frequency: **160 MHz**
    - USB CDC On Boot: **Enabled**
    - Upload Speed: **921600**
-4. Flash and open Serial Monitor at **115200 baud**.
+4. Flash the firmware.
 
 **Option B — arduino-cli**
 
@@ -55,7 +55,7 @@ No configuration file is required for a default build — it comes up as an AP h
 
 ## Expressions
 
-15 expressions, driven from HTTP (`/cmd?k=<key>`), the serial console, or the built-in web controller.
+15 expressions, driven from HTTP (`/cmd?k=<key>`) or the built-in web controller.
 
 | # | Expression | Key | Alias | Frames | Frame period | Behavior | Typical use |
 | :-: | --- | :-: | :-: | :-: | :-: | --- | --- |
@@ -138,10 +138,6 @@ clawd-mochi-plus/
 ├── LICENSE               # MIT (original + Plus contributors)
 └── README.md / README_zh.md
 ```
-
-## Serial Console
-
-USB CDC at 115200 baud accepts the same keys as `/cmd?k=` (e.g. `c`, `t`, `e`), plus terminal/drawing views. See the in-file comments for the full key map.
 
 ## Credits & License
 

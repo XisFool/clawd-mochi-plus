@@ -42,7 +42,7 @@
    - CPU Frequency：**160 MHz**
    - USB CDC On Boot：**Enabled**
    - Upload Speed：**921600**
-4. 烧录后串口监视器波特率 **115200**。
+4. 烧录固件即可。
 
 **方式二 —— arduino-cli**
 
@@ -55,7 +55,7 @@ arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadS
 
 ## 表情一览
 
-15 种表情，可通过 HTTP（`/cmd?k=<key>`）、串口控制台或内置网页控制器触发。
+15 种表情，可通过 HTTP（`/cmd?k=<key>`）或内置网页控制器触发。
 
 | 序号 | 表情 | 按键 | 别名 | 帧数 | 帧周期 | 行为 | 适用场景 |
 | :-: | --- | :-: | :-: | :-: | :-: | --- | --- |
@@ -138,10 +138,6 @@ clawd-mochi-plus/
 ├── LICENSE               # MIT（原作者 + Plus 贡献者）
 └── README.md / README_zh.md
 ```
-
-## 串口控制台
-
-USB CDC，波特率 115200，接受与 `/cmd?k=` 相同的按键（如 `c`、`t`、`e`），另有终端/画板视图。完整按键表见固件内注释。
 
 ## 致谢与许可
 
