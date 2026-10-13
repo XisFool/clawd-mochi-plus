@@ -4,6 +4,8 @@
 
 本项目源自 [yousifamanuel/clawd-mochi](https://github.com/yousifamanuel/clawd-mochi)（MIT 许可）的独立固件增强分支，在保持原版硬件方案与开箱即用体验的基础上，为现代 AI 编程助手场景补充了一整套表情系统。
 
+<p align="center"><img src="docs/images/expressions-demo.gif" alt="Clawd Mochi Plus 表情演示 —— 全部 15 种表情"></p>
+
 - 🇬🇧 English: [README.md](README.md)
 - 🎬 离线预览：任意浏览器打开 `preview.html`，无需硬件
 
@@ -13,7 +15,7 @@
 
 - **15 种纯数学几何表情** —— 全部基于 `(eyeW, eyeH, eyeGap, eyeOx, eyeOy)` 在运行时用 `Adafruit_GFX` 图元实时绘制。零 ROM 位图、零内存帧缓冲。
 - **自适应几何引擎** —— 通过 `/eye` HTTP 接口调节眼睛宽高、间距与偏移，15 种表情自动等比缩放；显式 `save=1` 才写入 NVS 持久化。
-- **仿真 Idle 生命感** —— 2.5~6 秒随机眨眼、6~15 秒随机左右环视、5 分钟无操作自动进入横条 + zZ 小憩。
+- **仿真 Idle 生命感** —— 2.5~6 秒随机眨眼、6~15 秒随机左右环视、每 30~60 秒一次短暂的 `> <` 眯眼、5 分钟无操作自动进入横条 + zZ 小憩。
 - **零门槛双模 WiFi** —— 默认原版 AP 热点开箱即用（`ClaWD-Mochi` / `clawd1234` / `192.168.4.1`）；取消注释一个宏即可切换为家庭局域网静态 IP。
 - **内置网页控制器** —— 设备自带移动端页面：表情矩阵、几何滑块、调色板、终端视图、画板。
 - **离线逐帧预览器** —— `preview.html` 回放固件渲染的全部 15 种表情帧，支持播放/暂停与单帧步进。纯本地运行，无 CDN 依赖。
@@ -57,6 +59,8 @@ arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadS
 
 15 种表情，可通过 HTTP（`/cmd?k=<key>`）或内置网页控制器触发。
 
+<p align="center"><img src="docs/images/expressions-overview.png" alt="全部 15 种表情与名称"></p>
+
 | 序号 | 表情 | 按键 | 别名 | 帧数 | 帧周期 | 行为 | 适用场景 |
 | :-: | --- | :-: | :-: | :-: | :-: | --- | --- |
 | 1 | 普通 | `w` | `w` | 1 | — | 常驻视图，受 Idle 眨眼/环视影响 | 空闲待机 |
@@ -77,17 +81,19 @@ arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadS
 
 **挤压眼（`s`）** —— 经典的 `> <` 视图 —— 是**独立常驻视图**，不计入 15 种表情；切换过去后会一直停留，直到手动切换。
 
+`/cmd?k=` 还接受这些视图按键：`s` 挤压眼视图、`d` 终端视图、`q` 退出终端、`i` WiFi 信息页、`a` 重播 logo 动画、`n` 静默恢复普通脸（不打断当前视图）。
+
 临时表情 5 秒后自动恢复（思考为 6 秒）；用 `/cmd?k=t&hold=30000`（500~600000 ms）可延长时间。
 
 ## REST API
 
-访问地址：`http://192.168.4.1`（AP 模式）或你配置的静态 IP（STA 模式）。所有接口返回 JSON。
+访问地址：`http://192.168.4.1`（AP 模式）或你配置的静态 IP（STA 模式）。以下接口均返回 JSON。
 
 | 接口 | 用途 |
 | --- | --- |
 | `/cmd?k=<key>` | 触发表情按键或别名（见上表）。临时表情可加 `hold=<ms>`。回复 `busy:1` 表示当前有阻塞动画在播放。 |
 | `/eye?w=&h=&gap=&ox=&oy=` | 调节眼宽/眼高/眼距/水平偏移/垂直偏移。加 `save=1` 写入 NVS 持久化；`reset=1` 恢复默认。 |
-| `/state` | 当前视图、表情、idle/背光状态、眼部几何参数、WiFi 模式（`ap`/`sta`）、IP、RSSI、剩余堆内存。 |
+| `/state` | 当前视图、表情、idle/背光状态、眼部几何参数、动画背景色（`bg`）、WiFi 模式（`ap`/`sta`）、IP、RSSI（仅 STA 模式）、剩余堆内存。 |
 | `/idle?on=1\|0` | 开/关 Idle 生命机能（立即持久化）。 |
 | `/speed?v=1\|2\|3` | 动画速度：1 = 慢（默认），2 = 正常，3 = 快。 |
 | `/backlight?on=1\|0` | 屏幕背光开/关。 |
@@ -102,6 +108,44 @@ curl "http://192.168.4.1/cmd?k=crying"
 curl "http://192.168.4.1/eye?w=36&h=72&gap=128&oy=36&save=1"
 curl "http://192.168.4.1/state"
 ```
+
+## 接入 Claude Code 示例
+
+任何 HTTP 客户端都能驱动表情：
+
+```bash
+curl "http://192.168.4.1/cmd?k=e"   # 执行中
+curl "http://192.168.4.1/cmd?k=l"   # 爱心 —— 全部完成
+```
+
+`examples/clawd-notify.py` 把 Claude Code 的 hook 事件映射为表情。推荐映射（可自行修改）：
+
+| Claude Code hook 事件 | 按键 | 表情 |
+| --- | :-: | --- |
+| `UserPromptSubmit` | `t` | 思考 |
+| `PreToolUse` | `e` | 执行中 |
+| `PostToolUseFailure` | `x` | 晕眩 |
+| `SubagentStart` | `t` | 思考 |
+| `PermissionRequest` | `m` | 害羞 |
+| `Stop` | `l` | 爱心 |
+| `StopFailure` | `c` | 哭泣 |
+| `SessionEnd` | `n` | 恢复普通 |
+
+在 Claude Code 的 `settings.json`（`hooks` 段）中接入该脚本，例如每次工具调用时：
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "*",
+        "hooks": [ { "type": "command",
+                     "command": "python /path/to/examples/clawd-notify.py", "timeout": 5 } ] }
+    ]
+  }
+}
+```
+
+设备不在默认 AP 地址时，设置环境变量 `CLAWD_URL`。脚本不会拖慢 Claude Code：2 秒网络超时，连接失败直接忽略。
 
 ## WiFi 模式
 
@@ -133,9 +177,14 @@ STA 注意事项：仅支持 2.4GHz 网络；静态 IP 请选路由器 DHCP 地�
 ```text
 clawd-mochi-plus/
 ├── clawd_mochi/
-│   └── clawd_mochi.ino   # 完整固件（单文件）
-├── preview.html          # 离线表情逐帧预览器
-├── LICENSE               # MIT（原作者 + Plus 贡献者）
+│   └── clawd_mochi.ino        # 完整固件（单文件）
+├── examples/
+│   └── clawd-notify.py        # Claude Code hook → 表情桥接（示例）
+├── docs/images/               # README 配图（由固件渲染帧生成）
+├── preview.html               # 离线表情逐帧预览器
+├── .github/workflows/compile.yml   # CI：每次推送自动编译固件
+├── CHANGELOG.md
+├── LICENSE                    # MIT（原作者 + Plus 贡献者）
 └── README.md / README_zh.md
 ```
 

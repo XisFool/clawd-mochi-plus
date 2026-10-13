@@ -4,6 +4,8 @@
 
 This project is an independent firmware enhancement derived from [yousifamanuel/clawd-mochi](https://github.com/yousifamanuel/clawd-mochi) (MIT). It keeps the original hardware target and instant-on experience while adding a richer expression system for modern AI coding companions.
 
+<p align="center"><img src="docs/images/expressions-demo.gif" alt="Clawd Mochi Plus expression demo — all 15 faces"></p>
+
 - 🇨🇳 中文文档: [README_zh.md](README_zh.md)
 - 🎬 Offline preview: open `preview.html` in any browser (no hardware needed)
 
@@ -13,7 +15,7 @@ This project is an independent firmware enhancement derived from [yousifamanuel/
 
 - **15 expressions, pure math** — every expression is drawn at runtime from `(eyeW, eyeH, eyeGap, eyeOx, eyeOy)` with `Adafruit_GFX` primitives. Zero ROM bitmaps, zero RAM frame buffers.
 - **Adaptive geometry engine** — resize/reposition the eyes via the `/eye` HTTP API; all 15 expressions rescale proportionally. Values persist to NVS with an explicit `save=1`.
-- **Idle life machine** — randomized blinking (2.5–6 s), random left/right glances (6–15 s), and a 5-minute nap (`ZZ` + dozing bars) after inactivity.
+- **Idle life machine** — randomized blinking (2.5–6 s), random left/right glances (6–15 s), a brief `> <` squint every 30–60 s, and a 5-minute nap (`ZZ` + dozing bars) after inactivity.
 - **Dual-mode WiFi, zero config** — boots into the original standalone AP hotspot out of the box (`ClaWD-Mochi` / `clawd1234` / `192.168.4.1`). Uncomment one macro to join your home network with a static IP instead.
 - **Built-in web controller** — mobile-friendly page on the device itself: expression pad, geometry sliders, color picker, terminal view, drawing canvas.
 - **Offline frame-accurate preview** — `preview.html` replays firmware-rendered frames of all 15 expressions with play/pause and step-frame controls. Pure local, no CDN.
@@ -57,6 +59,8 @@ No configuration file is required for a default build — it comes up as an AP h
 
 15 expressions, driven from HTTP (`/cmd?k=<key>`) or the built-in web controller.
 
+<p align="center"><img src="docs/images/expressions-overview.png" alt="All 15 expressions with names"></p>
+
 | # | Expression | Key | Alias | Frames | Frame period | Behavior | Typical use |
 | :-: | --- | :-: | :-: | :-: | :-: | --- | --- |
 | 1 | Normal | `w` | `w` | 1 | — | persistent view, reacts to idle blink/glance | idle / standby |
@@ -77,17 +81,19 @@ No configuration file is required for a default build — it comes up as an AP h
 
 **Squeeze eyes (`s`)** — the classic `> <` view — is a **separate always-on view**, not part of the 15-expression set. It stays on screen until you switch away.
 
+`/cmd?k=` also accepts view keys: `s` squeeze-eyes view, `d` terminal view, `q` leave the terminal, `i` WiFi info page, `a` replay the logo animation, `n` silently return to normal eyes without leaving the current view.
+
 Temporary expressions auto-restore after 5 s (Think: 6 s); pass `/cmd?k=t&hold=30000` (500–600000 ms) to hold longer.
 
 ## REST API
 
-Base URL: `http://192.168.4.1` (AP) or your configured static IP (STA). All endpoints return JSON.
+Base URL: `http://192.168.4.1` (AP) or your configured static IP (STA). All endpoints below return JSON.
 
 | Endpoint | Purpose |
 | --- | --- |
 | `/cmd?k=<key>` | Trigger an expression key or alias (see table above). Optional `hold=<ms>` for temp expressions. `busy:1` in the reply means a blocking animation is playing. |
 | `/eye?w=&h=&gap=&ox=&oy=` | Adjust eye width/height, center distance, and X/Y offset. Add `save=1` to persist to NVS; `reset=1` restores defaults. |
-| `/state` | Current view, expression, idle/backlight flags, eye geometry, WiFi mode (`ap`/`sta`), IP, RSSI, free heap. |
+| `/state` | Current view, expression, idle/backlight flags, eye geometry, animation background (`bg`), WiFi mode (`ap`/`sta`), IP, RSSI (STA only), free heap. |
 | `/idle?on=1\|0` | Enable/disable the idle life machine (persisted immediately). |
 | `/speed?v=1\|2\|3` | Animation speed: 1 = slow (default), 2 = normal, 3 = fast. |
 | `/backlight?on=1\|0` | Screen backlight on/off. |
@@ -102,6 +108,44 @@ curl "http://192.168.4.1/cmd?k=crying"
 curl "http://192.168.4.1/eye?w=36&h=72&gap=128&oy=36&save=1"
 curl "http://192.168.4.1/state"
 ```
+
+## Drive it from Claude Code (example)
+
+Any HTTP client can drive the face:
+
+```bash
+curl "http://192.168.4.1/cmd?k=e"   # executing
+curl "http://192.168.4.1/cmd?k=l"   # heart — all done
+```
+
+`examples/clawd-notify.py` maps Claude Code hook events to faces. Suggested mapping (edit to taste):
+
+| Claude Code hook event | Key | Face |
+| --- | :-: | --- |
+| `UserPromptSubmit` | `t` | think |
+| `PreToolUse` | `e` | executing |
+| `PostToolUseFailure` | `x` | dizzy |
+| `SubagentStart` | `t` | think |
+| `PermissionRequest` | `m` | embarrassed |
+| `Stop` | `l` | heart |
+| `StopFailure` | `c` | crying |
+| `SessionEnd` | `n` | back to normal |
+
+Wire it into your Claude Code `settings.json` (`hooks` section), e.g. for every tool call:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "*",
+        "hooks": [ { "type": "command",
+                     "command": "python /path/to/examples/clawd-notify.py", "timeout": 5 } ] }
+    ]
+  }
+}
+```
+
+Set the `CLAWD_URL` environment variable if your device is not at the default AP address. The script never blocks Claude Code: 2 s network timeout, all connection errors ignored.
 
 ## WiFi Modes
 
@@ -133,9 +177,14 @@ Note: frames are pre-generated PNG matrices, so they do not react to `/eye` geom
 ```text
 clawd-mochi-plus/
 ├── clawd_mochi/
-│   └── clawd_mochi.ino   # complete firmware (single file)
-├── preview.html          # offline expression frame player
-├── LICENSE               # MIT (original + Plus contributors)
+│   └── clawd_mochi.ino        # complete firmware (single file)
+├── examples/
+│   └── clawd-notify.py        # Claude Code hook → expression bridge (example)
+├── docs/images/               # README figures (rendered from firmware frames)
+├── preview.html               # offline expression frame player
+├── .github/workflows/compile.yml   # CI: compiles the firmware on every push
+├── CHANGELOG.md
+├── LICENSE                    # MIT (original + Plus contributors)
 └── README.md / README_zh.md
 ```
 
