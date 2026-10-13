@@ -1341,7 +1341,7 @@ canvas{width:100%;border-radius:8px;border:1.5px solid #38343a;
 <div class="ctrl">
   <div class="ci" style="flex:1;display:flex;flex-direction:column;gap:4px;align-items:stretch">
     <span class="cl" style="font-size:10px;color:#8a8278;letter-spacing:1px;font-weight:bold;text-align:center">BACKGROUND</span>
-    <input type="color" class="cs" id="bgCol" value="#aa4818" oninput="onBgChange(this.value)">
+    <input type="color" class="cs" id="bgCol" value="#da1100" oninput="onBgChange(this.value)">
   </div>
   <div class="ci" style="flex:1;display:flex;flex-direction:column;gap:4px;align-items:stretch">
     <span class="cl" style="font-size:10px;color:#8a8278;letter-spacing:1px;font-weight:bold;text-align:center">PEN COLOR</span>
@@ -1678,6 +1678,7 @@ async function clearAll() {
 
 // Init: sync speed and backlight from ESP32, reset bg to default
 (async () => {
+  let bgHex = '#da1100';
   try {
     const r = await fetch('/state');
     const j = await r.json();
@@ -1701,10 +1702,11 @@ async function clearAll() {
       b.textContent = '\u25cb idle off';
       b.classList.remove('on'); b.classList.add('dim');
     }
+    if (j.bg) bgHex = j.bg;
   } catch(e) {}
-  // Always reset bg picker to default orange on page load
-  document.getElementById('bgCol').value = '#aa4818';
-  redrawCanvas('#aa4818');
+  // Sync bg picker with the device's current animation background
+  document.getElementById('bgCol').value = bgHex;
+  redrawCanvas(bgHex);
 })();
 </script>
 </body>
@@ -1950,8 +1952,10 @@ void routeState() {
   j += ",\"ox\":";     j += eyeOx;
   j += ",\"oy\":";     j += eyeOy;
   j += "}";
+  // Animation background as #RRGGBB — the web controller syncs its picker with it
+  j += ",\"bg\":\"";  j += rgb565ToHex(animBgColor);
   // Link diagnostics — appended fields only, existing keys untouched
-  j += ",\"mode\":\"";  j += staMode ? "sta" : "ap";
+  j += "\",\"mode\":\"";  j += staMode ? "sta" : "ap";
   j += "\",\"ip\":\"";  j += (staMode ? WiFi.localIP() : WiFi.softAPIP()).toString();
   j += "\"";
   if (staMode) {
