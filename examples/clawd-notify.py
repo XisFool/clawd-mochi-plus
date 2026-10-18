@@ -24,15 +24,13 @@ Wire it up in ``~/.claude/settings.json``, e.g. for every tool call:
       }
     }
 
-The script uses a short 0.4 s network timeout so an offline or busy device
-cannot stall the session. A 409 (device busy) is retried once after ~250 ms;
-all other errors are ignored.
+The script uses a short 0.4 s network timeout so an offline device cannot
+stall the session; all connection errors are ignored.
 """
 
 import json
 import os
 import sys
-import time
 import urllib.error
 import urllib.request
 
@@ -53,7 +51,6 @@ EVENT_ACTIONS = {
 }
 
 TIMEOUT_S = 0.4
-BUSY_RETRY_DELAY_S = 0.25
 
 
 def send(url: str):
@@ -81,9 +78,7 @@ def main() -> int:
     base = os.environ.get("CLAWD_URL", "http://clawd-mochi.local").rstrip("/")
     url = f"{base}/cmd?k={action}"
 
-    if send(url) == 409:
-        time.sleep(BUSY_RETRY_DELAY_S)
-        send(url)
+    send(url)
     return 0
 
 

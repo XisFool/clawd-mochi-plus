@@ -16,7 +16,7 @@ This project is an independent firmware enhancement derived from [yousifamanuel/
 - **15 expressions, pure math** — every expression is drawn at runtime from `(eyeW, eyeH, eyeGap, eyeOx, eyeOy)` with `Adafruit_GFX` primitives. Zero ROM bitmaps, zero RAM frame buffers.
 - **Adaptive geometry engine** — resize/reposition the eyes via the `/eye` HTTP API; all 15 expressions rescale proportionally. Values persist to NVS with an explicit `save=1`.
 - **Idle life machine** — randomized blinking (2.5–6 s), random left/right glances (6–15 s), a brief `> <` squint every 30–60 s, and a 5-minute nap (`ZZ` + dozing bars) after inactivity.
-- **STA-first WiFi with AP provisioning** — first boot starts the `ClaWD-Mochi` hotspot (`clawd1234` / `http://192.168.4.1`). Enter your 2.4 GHz credentials at `/wifi`; they persist in NVS and the device joins your network as `http://clawd-mochi.local` via mDNS. If boot cannot connect, the AP stays up and STA keeps retrying in AP+STA; at runtime, three failed reconnects also bring the AP back.
+- **STA-first WiFi with AP provisioning** — first boot starts the `ClaWD-Mochi` hotspot (`clawd1234` / `http://192.168.4.1`). Enter your 2.4 GHz credentials at `/wifi`; they persist in NVS and the device joins your network as `http://clawd-mochi.local` via mDNS. If boot cannot connect, the AP stays up and STA keeps retrying in AP+STA.
 - **Minimal built-in web controller** — mobile-friendly page on the device: 15 expression buttons, AP/STA link status, backlight toggle, and a `WiFi 设置` link. The `/eye` geometry API remains available over HTTP.
 - **Offline frame-accurate preview** — `preview.html` replays firmware-rendered frames of all 15 expressions with play/pause and step-frame controls. Pure local, no CDN.
 
@@ -63,16 +63,16 @@ No configuration file is required for a default build — the first boot starts 
 
 | # | Expression | Key | Alias | Frames | Frame period | Behavior | Typical use |
 | :-: | --- | :-: | :-: | :-: | :-: | --- | --- |
-| 1 | Normal | `w` | `w` | 1 | — | persistent view, reacts to idle blink/glance | idle / standby |
-| 2 | Happy | `h` | `h` | 1 | — | holds, auto-restores | praise / success |
-| 3 | Sleepy | `z` | `z` | 2 | 600 ms | loops; dozing bars + rising `zZ` | late night / wind-down |
-| 4 | Surprised | `o` | `o` | 5 | 60 ms | one-shot shake, enlarged eyes | listening / startled |
-| 5 | Wink | `k` | `k` | 1 | — | holds, auto-restores | playful moment |
-| 6 | Dizzy | `x` | `x` | 5 | 60 ms | one-shot sway, `X X` eyes | error / stuck / confusion |
-| 7 | Angry | `g` | `g` | 1 | — | holds, auto-restores | warning |
-| 8 | Heart | `l` | `l` | 2 | 250 ms | loops, pulsing heart eyes | task success / reward |
-| 9 | Think | `t` | `t` | 4 | 140 ms | loops, flowing wave bars | analysis / reasoning |
-| 10 | Executing | `e` | `e` | 3 | 200 ms | loops, both eyes erode inward | code running / tool call |
+| 1 | Normal | `w` | `normal` | 1 | — | persistent view, reacts to idle blink/glance | idle / standby |
+| 2 | Happy | `h` | `happy` | 1 | — | holds, auto-restores | praise / success |
+| 3 | Sleepy | `z` | `sleepy` | 2 | 600 ms | loops; dozing bars + rising `zZ` | late night / wind-down |
+| 4 | Surprised | `o` | `surprised` | 5 | 60 ms | one-shot shake, enlarged eyes | listening / startled |
+| 5 | Wink | `k` | `wink` | 1 | — | holds, auto-restores | playful moment |
+| 6 | Dizzy | `x` | `dizzy` | 5 | 60 ms | one-shot sway, `X X` eyes | error / stuck / confusion |
+| 7 | Angry | `g` | `angry` | 1 | — | holds, auto-restores | warning |
+| 8 | Heart | `l` | `heart` | 2 | 250 ms | loops, pulsing heart eyes | task success / reward |
+| 9 | Think | `t` | `think` | 4 | 140 ms | loops, flowing wave bars | analysis / reasoning |
+| 10 | Executing | `e` | `executing` | 3 | 200 ms | loops, both eyes erode inward | code running / tool call |
 | 11 | Crying | `c` | `crying` | 4 | 200 ms | loops, alternating teardrops | serious failure |
 | 12 | Shocked | `b` | `shocked` | 2 | 90 ms | loops, oversized jittering eyes | unexpected result |
 | 13 | Cool | `v` | `cool` | 2 | 350 ms | loops, sunglasses + moving glare | build passed / shipped |
@@ -81,9 +81,9 @@ No configuration file is required for a default build — the first boot starts 
 
 **Squeeze eyes (`s`)** — the classic `> <` view — is a **separate always-on view**, not part of the 15-expression set. It stays on screen until you switch away.
 
-`/cmd?k=` accepts the single-letter keys above and the full-word aliases: `normal`, `happy`, `sleepy`, `surprised`, `wink`, `dizzy`, `angry`, `heart`, `think`, `executing`, `crying`, `shocked`, `cool`, `embarrassed`, `delicious`, `squish`. The key `n` silently restores normal eyes in the normal view; it does not leave the squish view. Unknown or empty keys return HTTP **400** `{"error":"unknown key"}`; while a blocking animation is running the device returns HTTP **409** `{"busy":1}`.
+`/cmd?k=` accepts the single-letter keys above and the full-word aliases: `normal`, `happy`, `sleepy`, `surprised`, `wink`, `dizzy`, `angry`, `heart`, `think`, `executing`, `crying`, `shocked`, `cool`, `embarrassed`, `delicious`, `squish`. The key `n` silently restores normal eyes in the normal view; it does not leave the squish view. Unknown or empty keys return HTTP **400** `{"error":"unknown key"}`.
 
-Temporary expressions auto-restore after 5 s (Think: 6 s). Pass `lease=<ms>` (500–1800000, i.e. up to 30 minutes) to hold longer; `hold` is accepted as a compatibility alias and `lease` wins when both are present. Normal eyes and squish ignore the lease.
+Temporary expressions auto-restore after 5 s (Think: 6 s). Pass `lease=<ms>` (500–1800000, i.e. up to 30 minutes) to hold longer. Normal eyes and squish ignore the lease.
 
 ## REST API
 
@@ -91,15 +91,15 @@ Base URL: `http://192.168.4.1` (AP) or `http://clawd-mochi.local` / the DHCP add
 
 | Endpoint | Purpose |
 | --- | --- |
-| `/cmd?k=<key>` | Trigger an expression key or alias (see table above). Optional `lease=<ms>` (500–1800000) for temp expressions; `hold` is a compat alias. HTTP 400 on an unknown key, HTTP 409 + `busy:1` while a blocking animation is playing. |
+| `/cmd?k=<key>` | Trigger an expression key or alias (see table above). Optional `lease=<ms>` (500–1800000) for temp expressions. HTTP 400 on an unknown key. |
 | `/eye?w=&h=&gap=&ox=&oy=` | Adjust eye width/height, center distance, and X/Y offset. Add `save=1` to persist to NVS; `reset=1` restores defaults. |
-| `/state` | Current view, expression, idle/backlight flags, eye geometry, animation background (`bg`), WiFi mode (`ap`/`sta`), IP, hostname, RSSI (STA only), free heap. Sent with `Cache-Control: no-store`. |
+| `/state` | Current expression, idle/backlight flags, eye geometry, animation speed, animation background (`bg`), WiFi mode (`ap`/`sta`), IP, hostname, RSSI (STA only), free heap. Sent with `Cache-Control: no-store`. |
 | `/wifi` | `GET` returns the provisioning form; `POST ssid=&pass=` saves credentials to NVS and reboots. Empty SSID returns HTTP 400. |
 | `/health` | `{"ok":true}` with `Cache-Control: no-store`. |
 | `/idle?on=1\|0` | Enable/disable the idle life machine (persisted immediately). |
 | `/speed?v=1\|2\|3` | Animation speed: 1 = slow (default), 2 = normal, 3 = fast. |
 | `/backlight?on=1\|0` | Screen backlight on/off. |
-| `/redraw?bg=<RRGGBB>` | Set animation background color and redraw. |
+| `/redraw?bg=<RRGGBB>` | Set animation background color and redraw. Invalid colors return HTTP 400. |
 
 Example:
 
@@ -150,7 +150,7 @@ Wire it into your Claude Code `settings.json` (`hooks` section), e.g. for every 
 }
 ```
 
-The script defaults to `http://clawd-mochi.local`. If mDNS is unavailable, set `CLAWD_URL` to the device IP (for example `http://192.168.4.1` during first-boot AP provisioning). The script uses a 0.4 s network timeout; a 409 busy reply is retried once after ~250 ms, and other connection errors are ignored.
+The script defaults to `http://clawd-mochi.local`. If mDNS is unavailable, set `CLAWD_URL` to the device IP (for example `http://192.168.4.1` during first-boot AP provisioning). The script uses a 0.4 s network timeout; connection errors are ignored.
 
 ## WiFi Modes
 
@@ -161,7 +161,7 @@ The script defaults to `http://clawd-mochi.local`. If mDNS is unavailable, set `
 
 **After provisioning — home network (STA).** The device boots as a station, gets a DHCP address, and advertises `http://clawd-mochi.local` over mDNS. Boot waits up to 15 s for the connection; if it fails, the AP hotspot comes up in AP+STA mode and STA keeps retrying so you can re-provision.
 
-**Runtime fallback.** A 10 s watchdog calls `WiFi.reconnect()` on drop. After three consecutive failures the device switches to `WIFI_AP_STA`, brings the hotspot up once (no repeated `softAP` calls), and keeps retrying the home network. The AP remains available at `192.168.4.1` while STA recovers.
+**Runtime reconnect.** A 10 s watchdog calls `WiFi.reconnect()` on drop. The AP is only started at boot; if the router password changes while the device is running, reboot it to return to the boot fallback AP.
 
 Notes: 2.4 GHz networks only; there is no static-IP configuration — the router's DHCP assigns the address; mDNS is best-effort and does not block boot if it fails.
 

@@ -23,7 +23,6 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 #include <SPI.h>
-#include <math.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Preferences.h>
@@ -46,11 +45,7 @@ WebServer server(80);
 Preferences prefs;
 
 // STA link state: true while configured for / connected to home WiFi.
-// After three failed reconnects an AP stays available as a provisioning
-// fallback (WIFI_AP_STA) while reconnects keep running.
 bool     staMode          = false;
-bool     apFallback       = false;
-uint8_t  wifiFailCount    = 0;
 uint32_t lastWifiCheckMs  = 0;
 #define STA_CONNECT_TIMEOUT_MS  15000UL  // boot: give STA ~15 s
 #define WIFI_WATCHDOG_MS        10000UL  // loop: reconnect check interval
@@ -86,14 +81,11 @@ int16_t eyeOx  = 0;    // horizontal offset
 int16_t eyeOy  = 40;   // vertical offset upward (subtracted from centre)
 
 // ── Colours ───────────────────────────────────────────────────
-uint16_t C_ORANGE, C_DARKBG, C_MUTED, C_GREEN, C_RED;
+uint16_t C_ORANGE, C_DARKBG, C_MUTED, C_RED;
 #define C_WHITE ST77XX_WHITE
 #define C_BLACK ST77XX_BLACK
 
 // ── State ─────────────────────────────────────────────────────
-#define VIEW_EYES_NORMAL 0
-#define VIEW_EYES_SQUISH 1
-
 enum Expr : uint8_t {
   EXPR_NORMAL    = 0,
   EXPR_SQUISH    = 1,
@@ -113,9 +105,7 @@ enum Expr : uint8_t {
   EXPR_DELICIOUS = 19
 };
 
-uint8_t  currentView  = VIEW_EYES_NORMAL;
 uint8_t  currentExpr  = EXPR_NORMAL;
-bool     busy         = false;
 bool     backlightOn  = true;
 uint8_t  animSpeed    = 1;   // 1=slow(default) 2=normal 3=fast
 bool     napping      = false;
@@ -167,64 +157,6 @@ uint32_t blinkFxNext = 0;
 // ── Logo data ─────────────────────────────────────────────────
 #define LOGO_CX 120
 #define LOGO_CY 105
-
-#define LOGO_TRI_COUNT 162
-static const int16_t LOGO_TRIS[][6] PROGMEM = {
-  {120,105,65,134,100,114},{120,105,100,114,101,113},{120,105,101,113,100,112},
-  {120,105,100,112,99,112},{120,105,99,112,93,111},{120,105,93,111,73,111},
-  {120,105,73,111,55,110},{120,105,55,110,38,109},{120,105,38,109,34,108},
-  {120,105,34,108,30,103},{120,105,30,103,30,100},{120,105,30,100,34,98},
-  {120,105,34,98,39,98},{120,105,39,98,50,99},{120,105,50,99,67,100},
-  {120,105,67,100,80,101},{120,105,80,101,98,103},{120,105,98,103,101,103},
-  {120,105,101,103,101,102},{120,105,101,102,100,101},{120,105,100,101,100,100},
-  {120,105,100,100,82,88},{120,105,82,88,63,76},{120,105,63,76,53,69},
-  {120,105,53,69,48,65},{120,105,48,65,45,61},{120,105,45,61,44,54},
-  {120,105,44,54,49,49},{120,105,49,49,55,49},{120,105,55,49,57,49},
-  {120,105,57,49,64,55},{120,105,64,55,78,66},{120,105,78,66,96,79},
-  {120,105,96,79,99,81},{120,105,99,81,100,81},{120,105,100,81,100,80},
-  {120,105,100,80,99,78},{120,105,99,78,89,60},{120,105,89,60,78,41},
-  {120,105,78,41,73,34},{120,105,73,34,72,29},{120,105,72,29,72,28},
-  {120,105,72,28,72,27},{120,105,72,27,71,26},{120,105,71,26,71,25},
-  {120,105,71,25,71,24},{120,105,71,24,77,16},{120,105,77,16,80,15},
-  {120,105,80,15,87,16},{120,105,87,16,91,19},{120,105,91,19,95,29},
-  {120,105,95,29,103,46},{120,105,103,46,114,68},{120,105,114,68,118,75},
-  {120,105,118,75,119,81},{120,105,119,81,120,83},{120,105,120,83,121,83},
-  {120,105,121,83,121,82},{120,105,121,82,122,69},{120,105,122,69,124,54},
-  {120,105,124,54,126,34},{120,105,126,34,126,28},{120,105,126,28,129,21},
-  {120,105,129,21,135,18},{120,105,135,18,139,20},{120,105,139,20,143,25},
-  {120,105,143,25,142,28},{120,105,142,28,140,42},{120,105,140,42,136,64},
-  {120,105,136,64,133,78},{120,105,133,78,135,78},{120,105,135,78,136,76},
-  {120,105,136,76,144,67},{120,105,144,67,156,51},{120,105,156,51,162,45},
-  {120,105,162,45,168,38},{120,105,168,38,172,35},{120,105,172,35,180,35},
-  {120,105,180,35,185,43},{120,105,185,43,183,52},{120,105,183,52,175,62},
-  {120,105,175,62,168,71},{120,105,168,71,159,83},{120,105,159,83,153,94},
-  {120,105,153,94,154,94},{120,105,154,94,155,94},{120,105,155,94,176,90},
-  {120,105,176,90,188,88},{120,105,188,88,201,85},{120,105,201,85,208,88},
-  {120,105,208,88,208,91},{120,105,208,91,206,97},{120,105,206,97,191,101},
-  {120,105,191,101,174,104},{120,105,174,104,148,110},{120,105,148,110,148,111},
-  {120,105,148,111,148,111},{120,105,148,111,160,112},{120,105,160,112,165,112},
-  {120,105,165,112,177,112},{120,105,177,112,200,114},{120,105,200,114,205,118},
-  {120,105,205,118,209,123},{120,105,209,123,208,126},{120,105,208,126,199,131},
-  {120,105,199,131,187,128},{120,105,187,128,159,121},{120,105,159,121,149,119},
-  {120,105,149,119,147,119},{120,105,147,119,147,120},{120,105,147,120,156,128},
-  {120,105,156,128,170,141},{120,105,170,141,189,158},{120,105,189,158,190,163},
-  {120,105,190,163,188,166},{120,105,188,166,185,166},{120,105,185,166,169,153},
-  {120,105,169,153,162,148},{120,105,162,148,148,136},{120,105,148,136,147,136},
-  {120,105,147,136,147,137},{120,105,147,137,150,142},{120,105,150,142,168,168},
-  {120,105,168,168,169,176},{120,105,169,176,168,179},{120,105,168,179,163,180},
-  {120,105,163,180,158,179},{120,105,158,179,148,165},{120,105,148,165,137,149},
-  {120,105,137,149,129,134},{120,105,129,134,128,135},{120,105,128,135,123,189},
-  {120,105,123,189,120,192},{120,105,120,192,115,194},{120,105,115,194,110,191},
-  {120,105,110,191,108,185},{120,105,108,185,110,174},{120,105,110,174,113,160},
-  {120,105,113,160,116,148},{120,105,116,148,118,134},{120,105,118,134,119,129},
-  {120,105,119,129,119,129},{120,105,119,129,118,129},{120,105,118,129,107,144},
-  {120,105,107,144,91,166},{120,105,91,166,78,180},{120,105,78,180,75,181},
-  {120,105,75,181,70,178},{120,105,70,178,70,173},{120,105,70,173,73,169},
-  {120,105,73,169,91,146},{120,105,91,146,102,132},{120,105,102,132,109,124},
-  {120,105,109,124,109,123},{120,105,109,123,108,123},{120,105,108,123,61,153},
-  {120,105,61,153,52,155},{120,105,52,155,49,151},{120,105,49,151,49,146},
-  {120,105,49,146,51,144},{120,105,51,144,65,134},{120,105,65,134,65,134},
-};
 
 #define LOGO_SEG_COUNT 162
 static const int16_t LOGO_SEGS[][4] PROGMEM = {
@@ -281,11 +213,19 @@ int speedMs(int ms) {
   return ms;
 }
 
-uint16_t hexToRgb565(String hex) {
-  hex.replace("#", "");
-  if (hex.length() != 6) return C_WHITE;
-  long v = strtol(hex.c_str(), nullptr, 16);
-  return tft.color565((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
+bool hexToRgb565(const String &hex, uint16_t &out) {
+  String h = hex;
+  if (h.startsWith("#")) h.remove(0, 1);
+  if (h.length() != 6) return false;
+  for (uint8_t i = 0; i < 6; i++) {
+    const char c = h[i];
+    if (!((c >= '0' && c <= '9') ||
+          (c >= 'a' && c <= 'f') ||
+          (c >= 'A' && c <= 'F'))) return false;
+  }
+  const long v = strtol(h.c_str(), nullptr, 16);
+  out = tft.color565((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
+  return true;
 }
 
 void setBacklight(bool on) {
@@ -298,7 +238,6 @@ void initColours() {
   C_ORANGE = tft.color565(218, 17, 0);
   C_DARKBG = tft.color565(10,  12,  16);
   C_MUTED  = tft.color565(90,  88,  86);
-  C_GREEN  = tft.color565(80, 220, 130);
   C_RED    = tft.color565(255, 96, 96);
   animBgColor = C_ORANGE;
 }
@@ -309,11 +248,11 @@ void initColours() {
 
 void drawLogoFilled(uint16_t bg, uint16_t fg) {
   tft.fillScreen(bg);
-  for (uint16_t i = 0; i < LOGO_TRI_COUNT; i++) {
+  for (uint16_t i = 0; i < LOGO_SEG_COUNT; i++) {
     tft.fillTriangle(
-      pgm_read_word(&LOGO_TRIS[i][0]), pgm_read_word(&LOGO_TRIS[i][1]),
-      pgm_read_word(&LOGO_TRIS[i][2]), pgm_read_word(&LOGO_TRIS[i][3]),
-      pgm_read_word(&LOGO_TRIS[i][4]), pgm_read_word(&LOGO_TRIS[i][5]),
+      LOGO_CX, LOGO_CY,
+      pgm_read_word(&LOGO_SEGS[i][0]), pgm_read_word(&LOGO_SEGS[i][1]),
+      pgm_read_word(&LOGO_SEGS[i][2]), pgm_read_word(&LOGO_SEGS[i][3]),
       fg);
   }
   tft.setTextColor(fg); tft.setTextSize(2);
@@ -423,30 +362,29 @@ void drawWifiConnectPage() {
 // ═════════════════════════════════════════════════════════════
 
 void animNormalEyes() {
-  busy = true;
+  idlePhase = IDLE_NONE;
+  cancelBlinkFx();
   const int16_t offs[] = {-16, 16, -16, 16, 0};
   for (uint8_t i = 0; i < 5; i++) { drawNormalEyes(offs[i]); delay(speedMs(80)); }
   drawNormalEyes(0, true);  delay(speedMs(100));
   drawNormalEyes(0, false); delay(speedMs(70));
   drawNormalEyes(0, true);  delay(speedMs(70));
   drawNormalEyes(0, false);
-  busy = false;
   resetIdleTimers();
 }
 
 void animSquishEyes() {
-  busy = true;
+  idlePhase = IDLE_NONE;
+  cancelBlinkFx();
   for (uint8_t i = 0; i < 3; i++) {
     drawSquishEyes(false); delay(speedMs(160));
     drawSquishEyes(true);  delay(speedMs(100));
   }
   drawSquishEyes(false);
-  busy = false;
   resetIdleTimers();
 }
 
 void animLogoReveal() {
-  busy = true;
   tft.fillScreen(animBgColor);
   for (uint16_t i = 0; i < LOGO_SEG_COUNT; i++) {
     int16_t x1 = pgm_read_word(&LOGO_SEGS[i][0]);
@@ -455,11 +393,10 @@ void animLogoReveal() {
     int16_t y2 = pgm_read_word(&LOGO_SEGS[i][3]);
     tft.drawLine(x1, y1, x2, y2, C_WHITE);
     tft.drawLine(x1 + 1, y1, x2 + 1, y2, C_WHITE);
-    if (i % 4 == 0) { server.handleClient(); delay(speedMs(8)); }
+    if (i % 4 == 0) delay(speedMs(8));
   }
   drawLogoFilled(animBgColor, C_WHITE);
   delay(1500);
-  busy = false;
   resetIdleTimers();
 }
 
@@ -548,8 +485,8 @@ void drawSquintBand() {
 void cancelBlinkFx() { blinkFxOn = false; blinkFxLeft = 0; }
 
 void startBlinkFx(uint8_t blinks) {
-  if (busy || napping) return;
-  if (currentView != VIEW_EYES_NORMAL || currentExpr != EXPR_NORMAL) return;
+  if (napping) return;
+  if (currentExpr != EXPR_NORMAL) return;
   blinkFxOn = true;
   blinkFxLeft = blinks * 2;
   blinkFxClosed = false;
@@ -559,8 +496,7 @@ void startBlinkFx(uint8_t blinks) {
 // Non-blocking one-shot blink, safe to call every loop()
 void blinkFxTick() {
   if (!blinkFxOn) return;
-  if (busy || napping ||
-      currentView != VIEW_EYES_NORMAL || currentExpr != EXPR_NORMAL) {
+  if (napping || currentExpr != EXPR_NORMAL) {
     cancelBlinkFx();
     return;
   }
@@ -579,17 +515,21 @@ void blinkFxTick() {
   }
 }
 
+void restoreNormalEyes() {
+  currentExpr = EXPR_NORMAL;
+  drawNormalEyes();
+  startBlinkFx(1);
+  resetIdleTimers();
+}
+
 void noteActivity() {
   bootRequestSeen = true;
-  resetIdleTimers();
-  if (napping && !busy) {
+  if (napping) {
     napping = false;
     napStatic = false;
-    if (currentView == VIEW_EYES_NORMAL) {
-      currentExpr = EXPR_NORMAL;
-      drawNormalEyes();
-      startBlinkFx(1);
-    }
+    restoreNormalEyes();
+  } else {
+    resetIdleTimers();
   }
 }
 
@@ -868,10 +808,8 @@ void startExpr(uint8_t e, bool isNap = false) {
   cancelBlinkFx();
   idlePhase = IDLE_NONE;
   if (!isNap) { napping = false; napStatic = false; }
-  currentView = VIEW_EYES_NORMAL;
   currentExpr = e;
   exprFrame = 0;
-  busy = true;
   switch (e) {
     case EXPR_SURPRISED:
       for (uint8_t i = 0; i < 4; i++) {
@@ -891,15 +829,13 @@ void startExpr(uint8_t e, bool isNap = false) {
       drawCurrentExpr();
       break;
   }
-  busy = false;
   nextFrameAt = millis() + exprFramePeriod(e);
   exprEndAt = millis() + (e == EXPR_THINK ? EXPR_THINK_HOLD_MS : EXPR_HOLD_MS);
   resetIdleTimers();
 }
 
 void exprTick() {
-  if (busy || napStatic) return;
-  if (currentView != VIEW_EYES_NORMAL) return;
+  if (napStatic) return;
   const uint32_t now = millis();
   const uint8_t frames = exprFrameCount(currentExpr);
   if (frames > 0 && (int32_t)(now - nextFrameAt) >= 0) {
@@ -909,10 +845,7 @@ void exprTick() {
   }
   const bool isTemp = currentExpr >= EXPR_HAPPY;
   if (isTemp && !napping && (int32_t)(now - exprEndAt) >= 0) {
-    currentExpr = EXPR_NORMAL;
-    drawNormalEyes();
-    startBlinkFx(1);
-    resetIdleTimers();
+    restoreNormalEyes();
   }
 }
 
@@ -949,20 +882,13 @@ void startIdleLook() {
 }
 
 void idleTick() {
-  if (napping) {
+  if (napping || !idleEnabled || !backlightOn || currentExpr != EXPR_NORMAL) {
     // Nap: animate for NAP_ANIM_MS, then stop redrawing. The backlight
     // stays on — only the frame pump is paused.
-    if (!napStatic && (int32_t)(millis() - napStartMs) >= (int32_t)NAP_ANIM_MS) {
+    if (napping && !napStatic &&
+        (int32_t)(millis() - napStartMs) >= (int32_t)NAP_ANIM_MS) {
       napStatic = true;
     }
-    if (idlePhase != IDLE_NONE) { idlePhase = IDLE_NONE; cancelBlinkFx(); }
-    return;
-  }
-  if (!idleEnabled || busy || !backlightOn) {
-    if (idlePhase != IDLE_NONE) { idlePhase = IDLE_NONE; cancelBlinkFx(); }
-    return;
-  }
-  if (currentView != VIEW_EYES_NORMAL || currentExpr != EXPR_NORMAL) {
     if (idlePhase != IDLE_NONE) { idlePhase = IDLE_NONE; cancelBlinkFx(); }
     return;
   }
@@ -1152,11 +1078,12 @@ function setBusy(b) {
 }
 
 async function waitNotBusy() {
+  // The server handles one request at a time; a completed /state request
+  // means any blocking animation has finished.
   for (let i = 0; i < 100; i++) {
     try {
       const r = await fetch('/state');
-      const j = await r.json();
-      if (!j.busy) return;
+      if (r.ok) return;
     } catch(e) {}
     await new Promise(r => setTimeout(r, 150));
   }
@@ -1169,7 +1096,7 @@ async function sendExpr(btn, k, name) {
   setTimeout(() => btn.classList.remove('hi'), 400);
   let r = null;
   try { r = await fetch('/cmd?k=' + k); } catch(e) {}
-  if (!r || !r.ok) { toast('设备忙或离线', false); return; }
+  if (!r || !r.ok) { toast('设备离线', false); return; }
   setBusy(true);
   toast(name);
   await waitNotBusy();
@@ -1195,7 +1122,7 @@ async function toggleBL() {
   if (!ok) {
     blOn = !blOn;
     paintBL();
-    toast('设备忙或离线', false);
+    toast('设备离线', false);
   }
 }
 
@@ -1292,30 +1219,31 @@ void routeHealth() {
 
 // Explicit /cmd key table — single letters plus full-word aliases.
 // `n` is the silent "back to normal eyes" action (not an expression alias).
-struct KeyMap { const char *key; char code; };
+constexpr int8_t CMD_RESTORE = -1;
+struct KeyMap { const char *key; int8_t action; };
 static const KeyMap KEY_MAP[] = {
-  {"w", 'w'}, {"normal", 'w'},
-  {"h", 'h'}, {"happy", 'h'},
-  {"z", 'z'}, {"sleepy", 'z'},
-  {"o", 'o'}, {"surprised", 'o'},
-  {"k", 'k'}, {"wink", 'k'},
-  {"x", 'x'}, {"dizzy", 'x'},
-  {"g", 'g'}, {"angry", 'g'},
-  {"l", 'l'}, {"heart", 'l'},
-  {"t", 't'}, {"think", 't'},
-  {"e", 'e'}, {"executing", 'e'},
-  {"c", 'c'}, {"crying", 'c'},
-  {"b", 'b'}, {"shocked", 'b'},
-  {"v", 'v'}, {"cool", 'v'},
-  {"m", 'm'}, {"embarrassed", 'm'},
-  {"y", 'y'}, {"delicious", 'y'},
-  {"s", 's'}, {"squish", 's'},
-  {"n", 'n'},
+  {"w", EXPR_NORMAL}, {"normal", EXPR_NORMAL},
+  {"h", EXPR_HAPPY}, {"happy", EXPR_HAPPY},
+  {"z", EXPR_SLEEPY}, {"sleepy", EXPR_SLEEPY},
+  {"o", EXPR_SURPRISED}, {"surprised", EXPR_SURPRISED},
+  {"k", EXPR_WINK}, {"wink", EXPR_WINK},
+  {"x", EXPR_DIZZY}, {"dizzy", EXPR_DIZZY},
+  {"g", EXPR_ANGRY}, {"angry", EXPR_ANGRY},
+  {"l", EXPR_HEART}, {"heart", EXPR_HEART},
+  {"t", EXPR_THINK}, {"think", EXPR_THINK},
+  {"e", EXPR_EXECUTING}, {"executing", EXPR_EXECUTING},
+  {"c", EXPR_CRYING}, {"crying", EXPR_CRYING},
+  {"b", EXPR_SHOCKED}, {"shocked", EXPR_SHOCKED},
+  {"v", EXPR_COOL}, {"cool", EXPR_COOL},
+  {"m", EXPR_EMBARRASSED}, {"embarrassed", EXPR_EMBARRASSED},
+  {"y", EXPR_DELICIOUS}, {"delicious", EXPR_DELICIOUS},
+  {"s", EXPR_SQUISH}, {"squish", EXPR_SQUISH},
+  {"n", CMD_RESTORE},
 };
 
-bool lookupKey(const String &key, char &code) {
+bool lookupKey(const String &key, int8_t &action) {
   for (uint8_t i = 0; i < sizeof(KEY_MAP) / sizeof(KEY_MAP[0]); i++) {
-    if (key == KEY_MAP[i].key) { code = KEY_MAP[i].code; return true; }
+    if (key == KEY_MAP[i].key) { action = KEY_MAP[i].action; return true; }
   }
   return false;
 }
@@ -1326,60 +1254,37 @@ void routeCmd() {
     server.send(400, "application/json", "{\"error\":\"unknown key\"}");
     return;
   }
-  char c = 0;
-  if (!lookupKey(server.arg("k"), c)) {
+  int8_t action = 0;
+  if (!lookupKey(server.arg("k"), action)) {
     server.send(400, "application/json", "{\"error\":\"unknown key\"}");
-    return;
-  }
-  if (busy) {  // no reentry during blocking animations
-    server.send(409, "application/json", "{\"busy\":1}");
     return;
   }
   noteActivity();
 
-  // Optional lease (ms) for temp expressions. `hold` is a compat alias;
-  // `lease` wins when both are present. Applied after startExpr().
+  // Optional lease (ms) for temp expressions, applied after the action.
   uint32_t leaseMs = 0;
-  const char *leaseArg = nullptr;
-  if      (server.hasArg("lease")) leaseArg = "lease";
-  else if (server.hasArg("hold"))  leaseArg = "hold";
-  if (leaseArg) {
-    const long v = server.arg(leaseArg).toInt();
+  if (server.hasArg("lease")) {
+    const long v = server.arg("lease").toInt();
     if (v > 0) leaseMs = (uint32_t)constrain(v, 500L, 1800000L);
   }
 
   server.send(200, "application/json", "{\"ok\":1}");
 
-  switch (c) {
-    case 'w': currentView = VIEW_EYES_NORMAL; currentExpr = EXPR_NORMAL; animNormalEyes(); break;
-    case 's': currentView = VIEW_EYES_SQUISH; currentExpr = EXPR_SQUISH; animSquishEyes(); break;
-    case 'h': startExpr(EXPR_HAPPY);     break;
-    case 'z': startExpr(EXPR_SLEEPY);    break;
-    case 'o': startExpr(EXPR_SURPRISED); break;
-    case 'k': startExpr(EXPR_WINK);      break;
-    case 'x': startExpr(EXPR_DIZZY);     break;
-    case 'g': startExpr(EXPR_ANGRY);     break;
-    case 'l': startExpr(EXPR_HEART);     break;
-    case 't': startExpr(EXPR_THINK);     break;
-    case 'e': startExpr(EXPR_EXECUTING); break;
-    case 'c': startExpr(EXPR_CRYING);    break;
-    case 'b': startExpr(EXPR_SHOCKED);   break;
-    case 'v': startExpr(EXPR_COOL);      break;
-    case 'm': startExpr(EXPR_EMBARRASSED); break;
-    case 'y': startExpr(EXPR_DELICIOUS); break;
-    case 'n':
-      // Silent restore to normal eyes — no blocking animation; does not
-      // yank the user out of the squish view.
-      if (currentView == VIEW_EYES_NORMAL && currentExpr != EXPR_NORMAL) {
-        currentExpr = EXPR_NORMAL;
-        drawNormalEyes();
-        startBlinkFx(1);
-        resetIdleTimers();
-      }
-      break;
+  if (action == CMD_RESTORE) {
+    // Silent restore — no blocking animation; does not yank the user
+    // out of the squish view.
+    if (currentExpr >= EXPR_HAPPY) restoreNormalEyes();
+  } else if (action == EXPR_NORMAL) {
+    currentExpr = EXPR_NORMAL;
+    animNormalEyes();
+  } else if (action == EXPR_SQUISH) {
+    currentExpr = EXPR_SQUISH;
+    animSquishEyes();
+  } else {
+    startExpr((uint8_t)action);
   }
 
-  if (leaseMs > 0 && strchr("hzokxgltecbvmy", c)) {
+  if (leaseMs > 0 && currentExpr >= EXPR_HAPPY) {
     exprEndAt = millis() + leaseMs;
   }
 }
@@ -1406,8 +1311,7 @@ void routeEye() {
   if (server.hasArg("oy"))  eyeOy  = server.arg("oy").toInt();
   clampEyeParams();
   if (server.hasArg("save") && server.arg("save") == "1") saveEyeParams();  // NVS writes only on explicit save
-  const bool eyeView = (currentView == VIEW_EYES_NORMAL || currentView == VIEW_EYES_SQUISH);
-  if (!busy && eyeView) drawCurrentExpr();
+  drawCurrentExpr();
   server.send(200, "application/json", "{\"ok\":1}");
 }
 
@@ -1434,11 +1338,14 @@ void routeRedraw() {
   noteActivity();
   server.sendHeader("Cache-Control", "no-store");
   if (server.hasArg("bg")) {
-    animBgColor = hexToRgb565(server.arg("bg"));
+    uint16_t color = 0;
+    if (!hexToRgb565(server.arg("bg"), color)) {
+      server.send(400, "application/json", "{\"error\":\"bg must be RRGGBB\"}");
+      return;
+    }
+    animBgColor = color;
   }
-  if (currentView == VIEW_EYES_NORMAL || currentView == VIEW_EYES_SQUISH) {
-    drawCurrentExpr();
-  }
+  drawCurrentExpr();
   server.send(200, "application/json", "{\"ok\":1}");
 }
 
@@ -1467,9 +1374,9 @@ String rgb565ToHex(uint16_t c) {
 void routeState() {
   server.sendHeader("Cache-Control", "no-store");
   const bool staUp = WiFi.status() == WL_CONNECTED;
-  String j = "{\"view\":"; j += currentView;
-  j += ",\"busy\":";   j += busy        ? "true" : "false";
-  j += ",\"bl\":";     j += backlightOn ? "true" : "false";
+  String j;
+  j.reserve(320);
+  j = "{\"bl\":";     j += backlightOn ? "true" : "false";
   j += ",\"speed\":";  j += animSpeed;
   j += ",\"idle\":";   j += idleEnabled ? "true" : "false";
   j += ",\"expr\":";   j += currentExpr;
@@ -1518,7 +1425,6 @@ void setup() {
   tft.setRotation(1);
   initColours();
   loadEyeParams();
-  randomSeed(esp_random());
 
   // ── Boot splash ────────────────────────────────────────────
   tft.fillScreen(animBgColor);
@@ -1545,19 +1451,14 @@ void setup() {
            (int32_t)(millis() - wifiStart) < (int32_t)STA_CONNECT_TIMEOUT_MS) {
       delay(100);
     }
-    if (WiFi.status() == WL_CONNECTED) {
-      staMode = true;
-      WiFi.setAutoReconnect(true);
-    } else {
+    if (WiFi.status() != WL_CONNECTED) {
       // Keep the provisioning AP reachable while STA retries in AP+STA.
       WiFi.mode(WIFI_AP_STA);
       WiFi.softAP(AP_SSID, AP_PASS);
-      staMode = true;
-      apFallback = true;
-      wifiFailCount = 0;
-      WiFi.setAutoReconnect(true);
+      // Kick STA again after the mode switch; auto-reconnect is on by default.
       WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
     }
+    staMode = true;
   } else {
     WiFi.mode(WIFI_AP);               // first boot: provisioning hotspot
     WiFi.softAP(AP_SSID, AP_PASS);
@@ -1594,10 +1495,9 @@ void setup() {
   // ── Wake up: one wiggle+blink, unless a command arrived while
   //    the info page was visible (then keep its result on screen) ──
   if (!bootRequestSeen) {
-    currentView = VIEW_EYES_NORMAL;
     currentExpr = EXPR_NORMAL;
     animNormalEyes();
-  } else if (!busy) {
+  } else {
     drawCurrentExpr();
   }
 }
@@ -1608,23 +1508,11 @@ void setup() {
 
 void loop() {
   // STA watchdog: non-blocking reconnect attempt every 10 s on drop.
-  // After 3 consecutive failures the AP is brought up once as a provisioning
-  // fallback; reconnects keep running and the AP stays available.
   if (staMode &&
       (int32_t)(millis() - lastWifiCheckMs) >= (int32_t)WIFI_WATCHDOG_MS) {
     lastWifiCheckMs = millis();
     if (WiFi.status() != WL_CONNECTED) {
-      if (wifiFailCount < 3) wifiFailCount++;
-      if (wifiFailCount >= 3 && !apFallback) {
-        WiFi.mode(WIFI_AP_STA);
-        WiFi.softAP(AP_SSID, AP_PASS);
-        apFallback = true;
-        MDNS.end();
-        startMdns();
-      }
       WiFi.reconnect();
-    } else {
-      wifiFailCount = 0;
     }
   }
   server.handleClient();

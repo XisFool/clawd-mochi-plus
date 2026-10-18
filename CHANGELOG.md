@@ -14,27 +14,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - STA-first boot: saved credentials connect to the home network; first boot
   and failed connections bring up the `ClaWD-Mochi` AP hotspot in AP+STA mode
   while STA keeps retrying.
-- Runtime AP fallback after three failed reconnects (`WIFI_AP_STA`, single
-  `softAP` call, reconnects continue).
-- `/cmd` `lease=<ms>` parameter (500–1800000) for temporary expressions;
-  `hold` remains as a compatibility alias with `lease` taking precedence.
+- `/cmd` `lease=<ms>` parameter (500–1800000) for temporary expressions.
 
 ### Changed
 
 - Web controller reduced to a minimal expression page: 15 expression buttons,
   AP/STA link status, backlight toggle, and a WiFi settings link.
 - `/cmd` uses an explicit key/alias table; unknown or empty keys return
-  HTTP 400, and requests during a blocking animation return HTTP 409.
+  HTTP 400.
 - Nap animation freezes after 60 s (`NAP_ANIM_MS`) without touching the
   backlight; activity still wakes it normally.
-- `/state` adds `hostname`, drops the `term` field, and is sent with
-  `Cache-Control: no-store`.
-- `examples/clawd-notify.py`: 0.4 s timeout, lease-aware hook mapping,
-  one retry after ~250 ms on HTTP 409.
+- `/state` adds `hostname`, drops the `term`, `view`, and `busy` fields, and
+  is sent with `Cache-Control: no-store`.
+- `examples/clawd-notify.py`: 0.4 s timeout and lease-aware hook mapping.
 - Boot no longer overrides a command received while the info page is visible.
 
 ### Removed
 
+- Runtime AP fallback after three failed reconnects; the 10 s watchdog now
+  only calls `WiFi.reconnect()`. The AP remains a boot-time provisioning
+  fallback.
+- `hold` compatibility alias for `/cmd`'s `lease` parameter.
+- Unreachable HTTP 409 busy response and the internal `busy` state; the web
+  controller now waits for a completed `/state` request to track blocking
+  animations.
 - Terminal view (`/char`, keys `d`/`q`) and its `term*` drawing code.
 - Drawing canvas (`/canvas`, `/draw/clear`, `/draw/stroke`).
 - Runtime info-page (`i`) and logo-replay (`a`) commands; the boot logo and
