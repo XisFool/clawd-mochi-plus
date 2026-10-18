@@ -14,9 +14,9 @@
  *     VCC → 3V3
  *     GND → GND
  *
- *   WiFi Hotspot (Default out of the box):
- *     SSID: "ClaWD-Mochi"  pw: clawd1234  → http://192.168.4.1
- *   (Optional STA mode: see ENABLE_HOME_WIFI in code below)
+ *   WiFi (STA-first, AP provisioning):
+ *     First boot: hotspot "ClaWD-Mochi" / "clawd1234" → http://192.168.4.1/wifi
+ *     After provisioning: home network + http://clawd-mochi.local
  * ╚══════════════════════════════════════════════════════════════╝
  */
 
@@ -27,21 +27,8 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Preferences.h>
+#include <ESPmDNS.h>
 #include <esp_system.h>
-
-// ── Optional Home-WiFi (STA) Configuration ────────────────────
-// Uncomment the lines below to connect to your local WiFi network.
-// If commented out (default), Clawd Mochi starts the AP hotspot automatically:
-//   SSID: "ClaWD-Mochi"  Password: "clawd1234"  IP: 192.168.4.1
-// #define ENABLE_HOME_WIFI
-#ifdef ENABLE_HOME_WIFI
-  #define WIFI_SSID   "Your-WiFi-SSID"
-  #define WIFI_PASS   "Your-WiFi-Password"
-  #define SCREEN_IP   192,168,1,200
-  #define SCREEN_GW   192,168,1,1
-  #define SCREEN_MASK 255,255,255,0
-  #define SCREEN_DNS  192,168,1,1
-#endif
 
 // ── Pins ──────────────────────────────────────────────────────
 #define TFT_CS  4
@@ -54,14 +41,38 @@ Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 // ── WiFi ──────────────────────────────────────────────────────
 const char* AP_SSID = "ClaWD-Mochi";
 const char* AP_PASS = "clawd1234";
+const char* HOSTNAME = "clawd-mochi";
 WebServer server(80);
+Preferences prefs;
 
-// STA link state: true after a successful home-WiFi connect at boot.
-// Once STA came up we never fall back to AP — reconnect watchdog only.
+// STA link state: true while configured for / connected to home WiFi.
+// After three failed reconnects an AP stays available as a provisioning
+// fallback (WIFI_AP_STA) while reconnects keep running.
 bool     staMode          = false;
+bool     apFallback       = false;
+uint8_t  wifiFailCount    = 0;
 uint32_t lastWifiCheckMs  = 0;
 #define STA_CONNECT_TIMEOUT_MS  15000UL  // boot: give STA ~15 s
 #define WIFI_WATCHDOG_MS        10000UL  // loop: reconnect check interval
+
+bool loadWifiCreds(String &ssid, String &pass) {
+  prefs.begin("wifi", true);
+  ssid = prefs.getString("ssid", "");
+  pass = prefs.getString("pass", "");
+  prefs.end();
+  return ssid.length() > 0;
+}
+
+void saveWifiCreds(const String &ssid, const String &pass) {
+  prefs.begin("wifi", false);
+  prefs.putString("ssid", ssid);
+  prefs.putString("pass", pass);
+  prefs.end();
+}
+
+void startMdns() {
+  if (MDNS.begin(HOSTNAME)) MDNS.addService("http", "tcp", 80);
+}
 
 // ── Display ───────────────────────────────────────────────────
 #define DISP_W 240
@@ -82,9 +93,6 @@ uint16_t C_ORANGE, C_DARKBG, C_MUTED, C_GREEN, C_RED;
 // ── State ─────────────────────────────────────────────────────
 #define VIEW_EYES_NORMAL 0
 #define VIEW_EYES_SQUISH 1
-#define VIEW_CODE        2
-#define VIEW_DRAW        3
-#define VIEW_INFO        4
 
 enum Expr : uint8_t {
   EXPR_NORMAL    = 0,
@@ -111,10 +119,11 @@ bool     busy         = false;
 bool     backlightOn  = true;
 uint8_t  animSpeed    = 1;   // 1=slow(default) 2=normal 3=fast
 bool     napping      = false;
+bool     napStatic    = false;
+uint32_t napStartMs   = 0;
 bool     bootRequestSeen = false;
 
 uint16_t animBgColor  = 0;   // background for eye/logo animations
-uint16_t drawBgColor  = 0;   // background for canvas
 
 // ── Tuning constants ──────────────────────────────────────────
 #define WIFI_INFO_MS        8000UL  // boot info page duration
@@ -129,6 +138,7 @@ uint16_t drawBgColor  = 0;   // background for canvas
 #define IDLE_SQUINT_MIN_MS 30000UL
 #define IDLE_SQUINT_MAX_MS 60000UL
 #define SLEEP_AFTER_MS    300000UL  // nap after 5 min without activity
+#define NAP_ANIM_MS        60000UL  // sleepy animation duration before freezing
 #define IDLE_PAN_PX           12    // idle look-left/right amplitude
 
 // ── Idle / expression engine state ────────────────────────────
@@ -153,21 +163,6 @@ bool     blinkFxOn = false;
 uint8_t  blinkFxLeft = 0;    // toggle-steps remaining
 bool     blinkFxClosed = false;
 uint32_t blinkFxNext = 0;
-
-Preferences prefs;
-
-// ── Terminal ──────────────────────────────────────────────────
-#define TERM_COLS      15
-#define TERM_ROWS       8
-#define TERM_CHAR_W    12
-#define TERM_CHAR_H    20
-#define TERM_PAD_X      8
-#define TERM_PAD_Y     18
-
-bool    termMode    = false;
-String  termLines[TERM_ROWS];
-uint8_t termRow     = 0;
-uint8_t termCol     = 0;
 
 // ── Logo data ─────────────────────────────────────────────────
 #define LOGO_CX 120
@@ -306,7 +301,6 @@ void initColours() {
   C_GREEN  = tft.color565(80, 220, 130);
   C_RED    = tft.color565(255, 96, 96);
   animBgColor = C_ORANGE;
-  drawBgColor = C_ORANGE;
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -384,26 +378,13 @@ void drawSquishEyes(bool closed = false) {
   }
 }
 
-void drawCodeView() {
-  termMode = false;
-  tft.fillScreen(C_DARKBG);
-  tft.fillRect(0, 0,          DISP_W, 4, C_ORANGE);
-  tft.fillRect(0, DISP_H - 4, DISP_W, 4, C_ORANGE);
-  tft.setTextColor(C_ORANGE); tft.setTextSize(4);
-  tft.setCursor((DISP_W - 144) / 2, DISP_H / 2 - 52); tft.print("Claude");
-  tft.setTextColor(C_WHITE);  tft.setTextSize(4);
-  tft.setCursor((DISP_W - 96) / 2,  DISP_H / 2 + 8);  tft.print("Code");
-  tft.fillRect((DISP_W - 96) / 2, DISP_H / 2 + 52, 96, 3, C_ORANGE);
-}
-
 // Info page reflects the active mode (STA home WiFi / AP hotspot)
 void drawInfoPage() {
   tft.fillScreen(C_DARKBG);
   tft.fillRect(0, 0, DISP_W, 4, C_ORANGE);
   tft.setTextColor(C_WHITE);  tft.setTextSize(2);
-#ifdef ENABLE_HOME_WIFI
-  if (staMode) {
-    String ssid = String(WIFI_SSID);
+  if (WiFi.status() == WL_CONNECTED) {
+    String ssid = WiFi.SSID();
     if (ssid.length() > 14) ssid = ssid.substring(0, 14);
     tft.setCursor(12, 16);  tft.print("WiFi: " + ssid);
     tft.setTextColor(C_MUTED);  tft.setTextSize(1);
@@ -413,10 +394,9 @@ void drawInfoPage() {
     tft.setTextColor(C_ORANGE); tft.setTextSize(2);
     tft.setCursor(12, 94);  tft.print(WiFi.localIP().toString());
     tft.setTextColor(C_MUTED);  tft.setTextSize(1);
-    tft.setCursor(12, 124); tft.print("press any button to start");
+    tft.setCursor(12, 124); tft.print("Open http://clawd-mochi.local");
     return;
   }
-#endif
   tft.setCursor(12, 16);  tft.print("WiFi: ClaWD-Mochi");
   tft.setTextColor(C_MUTED);  tft.setTextSize(1);
   tft.setCursor(12, 44);  tft.print("password: clawd1234");
@@ -425,7 +405,7 @@ void drawInfoPage() {
   tft.setTextColor(C_ORANGE); tft.setTextSize(2);
   tft.setCursor(12, 94);  tft.print("192.168.4.1");
   tft.setTextColor(C_MUTED);  tft.setTextSize(1);
-  tft.setCursor(12, 124); tft.print("press any button to start");
+  tft.setCursor(12, 124); tft.print("Open http://192.168.4.1");
 }
 
 // Transient page while the STA attempt runs at boot (max ~15 s)
@@ -436,113 +416,6 @@ void drawWifiConnectPage() {
   tft.setCursor(12, 64);  tft.print("WiFi: connecting");
   tft.setTextColor(C_MUTED);  tft.setTextSize(1);
   tft.setCursor(12, 92);  tft.print("to home network...");
-}
-
-// ═════════════════════════════════════════════════════════════
-//  TERMINAL
-// ═════════════════════════════════════════════════════════════
-
-void termClear() {
-  for (uint8_t i = 0; i < TERM_ROWS; i++) termLines[i] = "";
-  termRow = 0; termCol = 0;
-}
-
-void termDrawHeader() {
-  tft.fillRect(0, 0, DISP_W, TERM_PAD_Y + 1, C_DARKBG);
-  tft.setTextColor(C_ORANGE); tft.setTextSize(1);
-  tft.setCursor(TERM_PAD_X, 4); tft.print("clawd@mochi terminal");
-  tft.drawFastHLine(0, TERM_PAD_Y, DISP_W, C_ORANGE);
-}
-
-// Prefix "clawd:~$ " in green, drawn only when the row has content
-void termDrawPrefix(int16_t yy) {
-  tft.setTextColor(C_GREEN); tft.setTextSize(1);
-  tft.setCursor(TERM_PAD_X, yy + 6);
-  tft.print("clawd:~$ ");
-}
-
-#define PREFIX_PX 54   // 9 chars × 6px = 54px at textSize 1
-
-void termDrawLine(uint8_t r) {
-  const int16_t yy = TERM_PAD_Y + 4 + r * TERM_CHAR_H;
-  tft.fillRect(0, yy, DISP_W, TERM_CHAR_H, C_DARKBG);
-  // show prefix only on the currently active (cursor) line
-  if (r == termRow) termDrawPrefix(yy);
-  tft.setTextColor(C_WHITE); tft.setTextSize(2);
-  tft.setCursor(TERM_PAD_X + PREFIX_PX, yy + 1);
-  tft.print(termLines[r]);
-  if (r == termRow) {
-    const int16_t cx = TERM_PAD_X + PREFIX_PX + termCol * TERM_CHAR_W;
-    tft.fillRect(cx, yy + 1, TERM_CHAR_W - 2, TERM_CHAR_H - 2, C_GREEN);
-  }
-}
-
-void termDrawLastChar() {
-  if (termCol == 0) return;
-  const int16_t yy    = TERM_PAD_Y + 4 + termRow * TERM_CHAR_H;
-  const int16_t baseX = TERM_PAD_X + PREFIX_PX;
-  const uint8_t prev  = termCol - 1;
-  // erase prev cell (had cursor block)
-  tft.fillRect(baseX + prev * TERM_CHAR_W, yy + 1, TERM_CHAR_W, TERM_CHAR_H - 1, C_DARKBG);
-  tft.setTextColor(C_WHITE); tft.setTextSize(2);
-  tft.setCursor(baseX + prev * TERM_CHAR_W, yy + 1);
-  tft.print(termLines[termRow][prev]);
-  // new cursor
-  tft.fillRect(baseX + termCol * TERM_CHAR_W, yy + 1, TERM_CHAR_W - 2, TERM_CHAR_H - 2, C_GREEN);
-}
-
-void termDrawBackspace() {
-  const int16_t yy    = TERM_PAD_Y + 4 + termRow * TERM_CHAR_H;
-  const int16_t baseX = TERM_PAD_X + PREFIX_PX;
-  // erase deleted char + old cursor
-  tft.fillRect(baseX + termCol * TERM_CHAR_W, yy + 1, TERM_CHAR_W * 2, TERM_CHAR_H - 1, C_DARKBG);
-  // new cursor
-  tft.fillRect(baseX + termCol * TERM_CHAR_W, yy + 1, TERM_CHAR_W - 2, TERM_CHAR_H - 2, C_GREEN);
-  // if line now empty, erase the prefix too
-  if (termLines[termRow].length() == 0) {
-    tft.fillRect(0, yy, TERM_PAD_X + PREFIX_PX, TERM_CHAR_H, C_DARKBG);
-  }
-}
-
-void termFullRedraw() {
-  tft.fillScreen(C_DARKBG);
-  termDrawHeader();
-  for (uint8_t r = 0; r < TERM_ROWS; r++) termDrawLine(r);
-}
-
-void termScroll() {
-  for (uint8_t i = 0; i < TERM_ROWS - 1; i++) termLines[i] = termLines[i + 1];
-  termLines[TERM_ROWS - 1] = "";
-  termRow = TERM_ROWS - 1;
-  termFullRedraw();
-}
-
-void termAddChar(char c) {
-  if (c == '\n' || c == '\r') {
-    const int16_t yy = TERM_PAD_Y + 4 + termRow * TERM_CHAR_H;
-    // erase cursor on current row
-    tft.fillRect(TERM_PAD_X + PREFIX_PX + termCol * TERM_CHAR_W,
-                 yy + 1, TERM_CHAR_W, TERM_CHAR_H - 1, C_DARKBG);
-    termRow++; termCol = 0;
-    if (termRow >= TERM_ROWS) { termScroll(); return; }
-    termDrawLine(termRow);  // draws prefix on new line
-  } else if (c == '\b' || c == 127) {
-    if (termCol > 0) {
-      termCol--;
-      termLines[termRow].remove(termLines[termRow].length() - 1);
-      termDrawBackspace();
-    }
-  } else if (c >= 32 && c < 127) {
-    if (termCol >= TERM_COLS) {
-      termRow++; termCol = 0;
-      if (termRow >= TERM_ROWS) { termScroll(); return; }
-    }
-    // draw prefix on first char of this line
-    if (termCol == 0) termDrawPrefix(TERM_PAD_Y + 4 + termRow * TERM_CHAR_H);
-    termLines[termRow] += c;
-    termCol++;
-    termDrawLastChar();
-  }
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -675,7 +548,7 @@ void drawSquintBand() {
 void cancelBlinkFx() { blinkFxOn = false; blinkFxLeft = 0; }
 
 void startBlinkFx(uint8_t blinks) {
-  if (busy || termMode || napping) return;
+  if (busy || napping) return;
   if (currentView != VIEW_EYES_NORMAL || currentExpr != EXPR_NORMAL) return;
   blinkFxOn = true;
   blinkFxLeft = blinks * 2;
@@ -686,7 +559,7 @@ void startBlinkFx(uint8_t blinks) {
 // Non-blocking one-shot blink, safe to call every loop()
 void blinkFxTick() {
   if (!blinkFxOn) return;
-  if (busy || termMode || napping ||
+  if (busy || napping ||
       currentView != VIEW_EYES_NORMAL || currentExpr != EXPR_NORMAL) {
     cancelBlinkFx();
     return;
@@ -711,6 +584,7 @@ void noteActivity() {
   resetIdleTimers();
   if (napping && !busy) {
     napping = false;
+    napStatic = false;
     if (currentView == VIEW_EYES_NORMAL) {
       currentExpr = EXPR_NORMAL;
       drawNormalEyes();
@@ -990,9 +864,10 @@ void drawCurrentExpr() {
   }
 }
 
-void startExpr(uint8_t e) {
+void startExpr(uint8_t e, bool isNap = false) {
   cancelBlinkFx();
   idlePhase = IDLE_NONE;
+  if (!isNap) { napping = false; napStatic = false; }
   currentView = VIEW_EYES_NORMAL;
   currentExpr = e;
   exprFrame = 0;
@@ -1023,7 +898,7 @@ void startExpr(uint8_t e) {
 }
 
 void exprTick() {
-  if (busy || termMode) return;
+  if (busy || napStatic) return;
   if (currentView != VIEW_EYES_NORMAL) return;
   const uint32_t now = millis();
   const uint8_t frames = exprFrameCount(currentExpr);
@@ -1047,7 +922,9 @@ void exprTick() {
 
 void startNap() {
   napping = true;
-  startExpr(EXPR_SLEEPY);
+  napStatic = false;
+  napStartMs = millis();
+  startExpr(EXPR_SLEEPY, true);
 }
 
 void startIdleBlink() {
@@ -1072,7 +949,16 @@ void startIdleLook() {
 }
 
 void idleTick() {
-  if (!idleEnabled || busy || termMode || napping || !backlightOn) {
+  if (napping) {
+    // Nap: animate for NAP_ANIM_MS, then stop redrawing. The backlight
+    // stays on — only the frame pump is paused.
+    if (!napStatic && (int32_t)(millis() - napStartMs) >= (int32_t)NAP_ANIM_MS) {
+      napStatic = true;
+    }
+    if (idlePhase != IDLE_NONE) { idlePhase = IDLE_NONE; cancelBlinkFx(); }
+    return;
+  }
+  if (!idleEnabled || busy || !backlightOn) {
     if (idlePhase != IDLE_NONE) { idlePhase = IDLE_NONE; cancelBlinkFx(); }
     return;
   }
@@ -1143,8 +1029,7 @@ void idleTick() {
 // ═════════════════════════════════════════════════════════════
 //  WEB PAGE
 // ═════════════════════════════════════════════════════════════
-const char INDEX_HTML[] PROGMEM = R"rawhtml(
-<!DOCTYPE html>
+const char INDEX_HTML[] PROGMEM = R"rawhtml(<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -1172,7 +1057,11 @@ body{background:#1c1c20;font-family:'Courier New',monospace;color:#e8e4dc;
   animation:sl 1s linear infinite}
 @keyframes sl{0%{margin-left:-30%}100%{margin-left:100%}}
 
-/* Controls */
+/* Status + controls */
+.stat{width:100%;max-width:390px;display:flex;justify-content:space-between;
+  align-items:center;font-size:10px;color:#8a8278;letter-spacing:1px}
+.stat b{color:#c96a3e;font-weight:bold}
+.wifi{color:#8a8278;text-decoration:none;border-bottom:1px dotted #5a5048}
 .ctrl{display:flex;gap:8px;width:100%;max-width:390px}
 .cbtn{flex:1;background:#252428;border:1.5px solid #38343a;border-radius:10px;
   color:#b8b4ac;font-family:'Courier New',monospace;font-size:11px;font-weight:bold;
@@ -1181,28 +1070,6 @@ body{background:#1c1c20;font-family:'Courier New',monospace;color:#e8e4dc;
 .cbtn:disabled{opacity:.3;cursor:default}
 .cbtn.on{border-color:#c96a3e;color:#c96a3e;background:#201408}
 .cbtn.dim{border-color:#2e2a28;color:#4a4540}
-
-/* View grid */
-.vgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;max-width:390px}
-.vbtn{background:#252428;border:1.5px solid #38343a;border-radius:12px;
-  color:#d8d4cc;font-family:'Courier New',monospace;
-  padding:14px 6px 10px;cursor:pointer;text-align:center;
-  transition:all .12s;user-select:none}
-.vbtn:active:not(:disabled){transform:scale(.94)}
-.vbtn:disabled{opacity:.3;cursor:default}
-.vbtn .ic{font-size:20px;display:block;margin-bottom:4px;line-height:1;color:#c96a3e}
-.vbtn .nm{font-size:12px;font-weight:bold;color:#e8e4dc}
-.vbtn .ht{font-size:9px;color:#8a8278;margin-top:3px}
-.vbtn.active{border-color:#c96a3e;background:#201408}
-.vbtn[data-v="1"].active{border-color:#c96a3e;background:#201408}
-.vbtn[data-v="2"].active{border-color:#4a8acd;background:#0c1628}
-.vbtn[data-v="3"].active{border-color:#38343a;background:#201c18}
-
-/* Speed slider */
-.speed-row{width:100%;max-width:390px;display:flex;align-items:center;gap:10px}
-.sl{font-size:10px;color:#6a6058;white-space:nowrap;min-width:36px}
-input[type=range]{flex:1;accent-color:#c96a3e;cursor:pointer;height:20px}
-.sv{font-size:11px;color:#c96a3e;min-width:44px;text-align:right;font-weight:bold}
 
 /* Expressions */
 .egrid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;width:100%;max-width:390px}
@@ -1214,45 +1081,6 @@ input[type=range]{flex:1;accent-color:#c96a3e;cursor:pointer;height:20px}
 .ebtn:active:not(:disabled){transform:scale(.94)}
 .ebtn:disabled{opacity:.3;cursor:default}
 .ebtn.hi{border-color:#c96a3e;color:#c96a3e;background:#201408}
-
-/* Eye size rows (reuses .sl/.sv) */
-.erow{width:100%;max-width:390px;display:flex;align-items:center;gap:10px}
-
-/* Terminal */
-.twrap{width:100%;max-width:390px;display:none;flex-direction:column;gap:8px}
-.twrap.open{display:flex}
-.thdr{display:flex;justify-content:space-between;align-items:center}
-.tttl{font-size:11px;color:#28b878;letter-spacing:1px;font-weight:bold}
-.tx{background:#0c1e12;border:2px solid #1a4828;border-radius:9px;
-  color:#28b878;font-family:'Courier New',monospace;font-size:13px;
-  font-weight:bold;padding:10px 18px;cursor:pointer}
-.tx:active{background:#081410}
-.trow{display:flex;gap:6px}
-.tin{flex:1;background:#0c1018;border:1.5px solid #1a2820;border-radius:9px;
-  color:#40d880;font-family:'Courier New',monospace;font-size:15px;
-  padding:11px;outline:none}
-.tin::placeholder{color:#2a3828}
-.tgo{background:#1a9060;border:none;border-radius:9px;color:#fff;
-  font-family:'Courier New',monospace;font-size:22px;font-weight:bold;
-  padding:11px 16px;cursor:pointer;min-width:52px}
-.tgo:active{background:#0f6040}
-
-/* Canvas */
-.cwrap{width:100%;max-width:390px;background:#222028;border:1.5px solid #38343a;
-  border-radius:12px;padding:12px;flex-direction:column;gap:10px;display:none}
-.cwrap.open{display:flex}
-.crow{display:flex;gap:8px}
-.ci{display:flex;flex-direction:column;align-items:center;gap:4px;flex:1}
-.cl{font-size:10px;color:#7a7068;letter-spacing:1px;font-weight:bold}
-.cs{width:100%;height:38px;border-radius:7px;border:1.5px solid #38343a;cursor:pointer;padding:0}
-.dacts{display:flex;gap:7px}
-.db{flex:1;background:#1c1820;border:1.5px solid #38343a;border-radius:9px;
-  color:#c0bab8;font-family:'Courier New',monospace;font-size:11px;
-  font-weight:bold;padding:11px 4px;cursor:pointer;transition:all .12s}
-.db:active{transform:scale(.95);background:#281838}
-.db.hi{border-color:#c96a3e;color:#c96a3e}
-canvas{width:100%;border-radius:8px;border:1.5px solid #38343a;
-  touch-action:none;cursor:crosshair;display:block}
 
 /* Toast */
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);
@@ -1271,41 +1099,13 @@ canvas{width:100%;border-radius:8px;border:1.5px solid #38343a;
 
 <div class="busy" id="busy"><div class="busy-i"></div></div>
 
-<div class="sec">// controls</div>
+<div class="stat">
+  <span><b>&#9679;</b> <span id="stat">connecting...</span></span>
+  <a class="wifi" href="/wifi">WiFi 设置</a>
+</div>
+
 <div class="ctrl">
   <button class="cbtn on" id="blBtn" onclick="toggleBL()">&#9728; display on</button>
-  <button class="cbtn on" id="idleBtn" onclick="toggleIdle()">&#9728; idle on</button>
-</div>
-
-<div class="sec">// views</div>
-<div class="vgrid">
-  <button class="vbtn active" data-v="0" onclick="setView(0)">
-    <span class="ic">&#9632; &#9632;</span>
-    <span class="nm">Normal eyes</span>
-    <span class="ht">wiggle + blink</span>
-  </button>
-  <button class="vbtn" data-v="1" onclick="setView(1)">
-    <span class="ic">&gt; &lt;</span>
-    <span class="nm">Squish eyes</span>
-    <span class="ht">open / close</span>
-  </button>
-  <button class="vbtn" data-v="2" onclick="setView(2)">
-    <span class="ic">{ }</span>
-    <span class="nm">Claude Code</span>
-    <span class="ht">opens terminal</span>
-  </button>
-  <button class="vbtn" data-v="3" onclick="toggleCanvas()">
-    <span class="ic">&#11035;</span>
-    <span class="nm">Canvas</span>
-    <span class="ht">draw on display</span>
-  </button>
-</div>
-
-<div class="sec">// speed</div>
-<div class="speed-row">
-  <span class="sl">slow</span>
-  <input type="range" id="spd" min="1" max="3" value="1" step="1" oninput="setSpeed(this.value)">
-  <span class="sv" id="spdV">slow</span>
 </div>
 
 <div class="sec">// expressions</div>
@@ -1320,69 +1120,19 @@ canvas{width:100%;border-radius:8px;border:1.5px solid #38343a;
   <button class="ebtn" onclick="sendExpr(this,'l','love')"><span class="ic">&#9829;&#9829;</span>love</button>
   <button class="ebtn" onclick="sendExpr(this,'t','thinking')"><span class="ic">&#8230;</span>think</button>
   <button class="ebtn" onclick="sendExpr(this,'e','executing')"><span class="ic">&#9654;&#9654;</span>executing</button>
-  <button class="ebtn" onclick="sendExpr(this,'crying','crying')"><span class="ic">T T</span>crying</button>
-  <button class="ebtn" onclick="sendExpr(this,'shocked','shocked')"><span class="ic">O ! O</span>shocked</button>
-  <button class="ebtn" onclick="sendExpr(this,'cool','cool')"><span class="ic">&#9632;&#8212;&#9632;</span>cool</button>
-  <button class="ebtn" onclick="sendExpr(this,'embarrassed','embarrassed')"><span class="ic">/ &#8226; /</span>embarrassed</button>
-  <button class="ebtn" onclick="sendExpr(this,'delicious','delicious')"><span class="ic">&#8211; &#164;</span>delicious</button>
-</div>
-
-<div class="sec">// eye size</div>
-<div class="erow"><span class="sl">width</span><input type="range" id="ew" min="10" max="80" value="30" oninput="onEyeInput()"><span class="sv" id="ewV">30</span></div>
-<div class="erow"><span class="sl">height</span><input type="range" id="eh" min="20" max="120" value="60" oninput="onEyeInput()"><span class="sv" id="ehV">60</span></div>
-<div class="erow"><span class="sl">gap</span><input type="range" id="egap" min="20" max="180" value="120" oninput="onEyeInput()"><span class="sv" id="egapV">120</span></div>
-<div class="erow"><span class="sl">off X</span><input type="range" id="eox" min="-40" max="40" value="0" oninput="onEyeInput()"><span class="sv" id="eoxV">0</span></div>
-<div class="erow"><span class="sl">off Y</span><input type="range" id="eoy" min="-60" max="80" value="40" oninput="onEyeInput()"><span class="sv" id="eoyV">40</span></div>
-<div class="ctrl">
-  <button class="cbtn" id="eyeSave" onclick="eyeSaveCfg()">save eyes</button>
-  <button class="cbtn" id="eyeReset" onclick="eyeResetCfg()">reset eyes</button>
-</div>
-
-<div class="ctrl">
-  <div class="ci" style="flex:1;display:flex;flex-direction:column;gap:4px;align-items:stretch">
-    <span class="cl" style="font-size:10px;color:#8a8278;letter-spacing:1px;font-weight:bold;text-align:center">BACKGROUND</span>
-    <input type="color" class="cs" id="bgCol" value="#da1100" oninput="onBgChange(this.value)">
-  </div>
-  <div class="ci" style="flex:1;display:flex;flex-direction:column;gap:4px;align-items:stretch">
-    <span class="cl" style="font-size:10px;color:#8a8278;letter-spacing:1px;font-weight:bold;text-align:center">PEN COLOR</span>
-    <input type="color" class="cs" id="penCol" value="#000000">
-  </div>
-</div>
-
-<div class="sec">// terminal</div>
-<div class="twrap" id="twrap">
-  <div class="thdr">
-    <span class="tttl">&#9658; clawd:~$</span>
-    <button class="tx" onclick="closeTerm()">&#x2715; exit terminal</button>
-  </div>
-  <div class="trow">
-    <input class="tin" id="tin" type="text" placeholder="type here..."
-           autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-    <button class="tgo" onclick="termEnter()">&#8629;</button>
-  </div>
-</div>
-
-<div class="cwrap" id="cwrap">
-  <div class="dacts">
-    <button class="db hi" onclick="clearAll()">&#11035; clear</button>
-    <button class="db" style="border-color:#28b878;color:#28b878" onclick="toggleCanvas()">&#10003; done</button>
-  </div>
-  <canvas id="cvs" width="240" height="240"></canvas>
+  <button class="ebtn" onclick="sendExpr(this,'c','crying')"><span class="ic">T T</span>crying</button>
+  <button class="ebtn" onclick="sendExpr(this,'b','shocked')"><span class="ic">O ! O</span>shocked</button>
+  <button class="ebtn" onclick="sendExpr(this,'v','cool')"><span class="ic">&#9632;&#8212;&#9632;</span>cool</button>
+  <button class="ebtn" onclick="sendExpr(this,'m','embarrassed')"><span class="ic">/ &#8226; /</span>embarrassed</button>
+  <button class="ebtn" onclick="sendExpr(this,'y','delicious')"><span class="ic">&#8211; &#164;</span>delicious</button>
 </div>
 
 <div class="toast" id="toast"></div>
 
 <script>
-let activeView  = 0;
-let termOpen    = false;
-let canvasOpen  = false;
-let blOn        = true;
-let isBusy      = false;
-let drawing     = false;
-let lastX = 0, lastY = 0;
+let blOn = true;
+let isBusy = false;
 let tt;
-
-const spdLabels = ['','slow','normal','fast'];
 
 // ── Toast ──────────────────────────────────────────────────────
 function toast(msg, ok=true) {
@@ -1398,26 +1148,7 @@ function toast(msg, ok=true) {
 function setBusy(b) {
   isBusy = b;
   document.getElementById('busy').classList.toggle('show', b);
-  const locked = b || termOpen;
-  document.querySelectorAll('.vbtn').forEach(el => {
-    // when canvas open, keep canvas btn (data-v=3) active so user can exit
-    el.disabled = canvasOpen ? parseInt(el.dataset.v) !== 3 : locked;
-  });
-  document.querySelectorAll('.lbtn').forEach(el => el.disabled = locked || canvasOpen);
-  document.querySelectorAll('.cbtn').forEach(el => {
-    if (el.id !== 'blBtn') el.disabled = locked;
-  });
-  document.querySelectorAll('.ebtn').forEach(el => el.disabled = locked || canvasOpen);
-  ['ew','eh','egap','eox','eoy','eyeSave','eyeReset'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.disabled = locked || canvasOpen;
-  });
-}
-
-// ── HTTP ────────────────────────────────────────────────────────
-async function req(path) {
-  try { const r = await fetch(path); return r.ok; }
-  catch(e) { toast('no connection', false); return false; }
+  document.querySelectorAll('.ebtn').forEach(el => el.disabled = b);
 }
 
 async function waitNotBusy() {
@@ -1431,284 +1162,95 @@ async function waitNotBusy() {
   }
 }
 
-// ── Background colour ───────────────────────────────────────────
-async function onBgChange(hex) {
-  if (canvasOpen) {
-    await req('/draw/clear?bg=' + encodeURIComponent(hex));
-  } else {
-    await req('/redraw?bg=' + encodeURIComponent(hex));
-  }
-  redrawCanvas(hex);
-}
-
-// ── Speed ───────────────────────────────────────────────────────
-async function setSpeed(v) {
-  document.getElementById('spdV').textContent = spdLabels[v];
-  await req('/speed?v=' + v);
-}
-
 // ── Expressions ─────────────────────────────────────────────────
 async function sendExpr(btn, k, name) {
-  if (isBusy || termOpen || canvasOpen) return;
+  if (isBusy) return;
   btn.classList.add('hi');
   setTimeout(() => btn.classList.remove('hi'), 400);
-  await req('/cmd?k=' + k);
-  toast(name);
-}
-
-// ── Eye size (throttled: max 1 request in flight, >=120ms apart) ─
-const EYE_DEFAULTS = {w:30, h:60, gap:120, ox:0, oy:40};
-let eyeInFlight = false, eyeDirty = false, eyeTimer = null;
-
-function eyeVals() {
-  return {
-    w:   +document.getElementById('ew').value,
-    h:   +document.getElementById('eh').value,
-    gap: +document.getElementById('egap').value,
-    ox:  +document.getElementById('eox').value,
-    oy:  +document.getElementById('eoy').value
-  };
-}
-function updateEyeLabels() {
-  const v = eyeVals();
-  document.getElementById('ewV').textContent = v.w;
-  document.getElementById('ehV').textContent = v.h;
-  document.getElementById('egapV').textContent = v.gap;
-  document.getElementById('eoxV').textContent = v.ox;
-  document.getElementById('eoyV').textContent = v.oy;
-}
-function onEyeInput() {
-  if (isBusy || termOpen || canvasOpen) return;
-  updateEyeLabels();
-  eyeDirty = true;
-  if (!eyeInFlight && eyeTimer === null) eyeTimer = setTimeout(flushEye, 120);
-}
-async function flushEye() {
-  eyeTimer = null;
-  if (!eyeDirty || eyeInFlight) return;
-  eyeDirty = false;
-  eyeInFlight = true;
-  const v = eyeVals();
-  await req('/eye?w=' + v.w + '&h=' + v.h + '&gap=' + v.gap +
-            '&ox=' + v.ox + '&oy=' + v.oy);
-  eyeInFlight = false;
-  if (eyeDirty && eyeTimer === null) eyeTimer = setTimeout(flushEye, 120);
-}
-async function eyeSaveCfg() {
-  await req('/eye?save=1');
-  toast('eye size saved');
-}
-function setEyeSliders(v) {
-  document.getElementById('ew').value = v.w;
-  document.getElementById('eh').value = v.h;
-  document.getElementById('egap').value = v.gap;
-  document.getElementById('eox').value = v.ox;
-  document.getElementById('eoy').value = v.oy;
-  updateEyeLabels();
-}
-async function eyeResetCfg() {
-  await req('/eye?reset=1');
-  setEyeSliders(EYE_DEFAULTS);
-  toast('eye size reset');
-}
-
-// ── Idle animation toggle ───────────────────────────────────────
-let idleOn = true;
-async function toggleIdle() {
-  idleOn = !idleOn;
-  const ok = await req('/idle?on=' + (idleOn ? 1 : 0));
-  if (!ok) { idleOn = !idleOn; return; }
-  const b = document.getElementById('idleBtn');
-  b.textContent = idleOn ? '\u25cf idle on' : '\u25cb idle off';
-  b.classList.toggle('on', idleOn);
-  b.classList.toggle('dim', !idleOn);
-  toast(idleOn ? 'idle animation on' : 'idle animation off');
-}
-
-// ── Views ───────────────────────────────────────────────────────
-async function setView(v) {
-  if (isBusy || termOpen || canvasOpen) return;
-  if (v === 3) { toggleCanvas(); return; }  // canvas button in grid
-  const keys = ['w','s','d'];
-  if (!await req('/cmd?k=' + keys[v])) return;
-  activeView = v;
-  document.querySelectorAll('.vbtn').forEach(b =>
-    b.classList.toggle('active', parseInt(b.dataset.v) === v));
-  if (v === 2) {
-    termOpen = true;
-    document.getElementById('twrap').classList.add('open');
-    setBusy(false);   // re-run to apply termOpen lock
-    setBusy(false);
-    document.querySelectorAll('.vbtn,.lbtn').forEach(b => b.disabled = true);
-    const cvb = document.getElementById('cvBtn'); if (cvb) cvb.disabled = true;
-    document.getElementById('tin').focus();
-    toast('terminal open');
-    return;
-  }
+  let r = null;
+  try { r = await fetch('/cmd?k=' + k); } catch(e) {}
+  if (!r || !r.ok) { toast('设备忙或离线', false); return; }
   setBusy(true);
+  toast(name);
   await waitNotBusy();
   setBusy(false);
 }
 
-// ── Logo animations (kept for startup, not exposed in UI) ──────
-
 // ── Backlight ───────────────────────────────────────────────────
-async function toggleBL() {
-  blOn = !blOn;
-  await req('/backlight?on=' + (blOn ? 1 : 0));
+function paintBL() {
   const b = document.getElementById('blBtn');
   b.textContent = blOn ? '\u2600 display on' : '\u25cb display off';
   b.classList.toggle('on', blOn);
   b.classList.toggle('dim', !blOn);
 }
 
-// ── Canvas toggle ───────────────────────────────────────────────
-async function toggleCanvas() {
-  canvasOpen = !canvasOpen;
-  document.getElementById('cwrap').classList.toggle('open', canvasOpen);
-  const b = document.getElementById('cvBtn');
-  if (b) { b.classList.toggle('on', canvasOpen); b.textContent = canvasOpen ? '\u2b1b canvas on' : '\u2b1b canvas'; }
-  // highlight the canvas vbtn (data-v=3) in the grid
-  document.querySelectorAll('.vbtn').forEach(btn =>
-    btn.classList.toggle('active', canvasOpen && parseInt(btn.dataset.v) === 3));
-  await req('/canvas?on=' + (canvasOpen ? 1 : 0));
-  if (canvasOpen) {
-    const bg = document.getElementById('bgCol').value;
-    redrawCanvas(bg);
-    await req('/draw/clear?bg=' + encodeURIComponent(bg));
-    // lock all other buttons
-    document.querySelectorAll('.vbtn,.lbtn,.ebtn').forEach(b => b.disabled = true);
-    ['ew','eh','egap','eox','eoy','eyeSave','eyeReset','idleBtn'].forEach(id => {
-      const el = document.getElementById(id); if (el) el.disabled = true;
-    });
-    toast('canvas active');
-  } else {
-    setBusy(false);   // re-evaluate locks
-    toast('canvas off');
+async function toggleBL() {
+  blOn = !blOn;
+  paintBL();
+  let ok = false;
+  try {
+    const r = await fetch('/backlight?on=' + (blOn ? 1 : 0));
+    ok = r.ok;
+  } catch(e) {}
+  if (!ok) {
+    blOn = !blOn;
+    paintBL();
+    toast('设备忙或离线', false);
   }
 }
 
-// ── Terminal ────────────────────────────────────────────────────
-const tin = document.getElementById('tin');
-let lastVal = '';
-tin.addEventListener('input', async () => {
-  const cur = tin.value, prev = lastVal;
-  if (cur.length > prev.length) {
-    await req('/char?c=' + encodeURIComponent(cur[cur.length - 1]));
-  } else if (cur.length < prev.length) {
-    await req('/char?c=%08');
-  }
-  lastVal = cur;
-});
-async function termEnter() {
-  await req('/char?c=%0A');
-  tin.value = ''; lastVal = ''; tin.focus();
-}
-tin.addEventListener('keydown', e => {
-  if (e.key === 'Enter') { e.preventDefault(); termEnter(); }
-});
-async function closeTerm() {
-  await req('/cmd?k=q');
-  termOpen = false;
-  document.getElementById('twrap').classList.remove('open');
-  setBusy(false);
-  toast('terminal closed');
-}
-
-// ── Canvas drawing — send full stroke on finger lift ────────────
-const cvs = document.getElementById('cvs');
-const ctx = cvs.getContext('2d');
-let strokePts = [];
-
-function getPos(e) {
-  const r = cvs.getBoundingClientRect();
-  const sx = cvs.width / r.width, sy = cvs.height / r.height;
-  const s = e.touches ? e.touches[0] : e;
-  return { x: (s.clientX - r.left) * sx, y: (s.clientY - r.top) * sy };
-}
-
-function redrawCanvas(hex) {
-  ctx.fillStyle = hex;
-  ctx.fillRect(0, 0, cvs.width, cvs.height);
-}
-
-function startDraw(e) {
-  e.preventDefault();
-  drawing = true;
-  strokePts = [];
-  const p = getPos(e); lastX = p.x; lastY = p.y;
-  strokePts.push({ x: Math.round(p.x), y: Math.round(p.y) });
-  // draw dot on canvas preview only — no display send yet
-  ctx.beginPath(); ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
-  ctx.fillStyle = document.getElementById('penCol').value; ctx.fill();
-}
-function moveDraw(e) {
-  if (!drawing) return; e.preventDefault();
-  const p = getPos(e);
-  ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y);
-  ctx.strokeStyle = document.getElementById('penCol').value;
-  ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.stroke();
-  strokePts.push({ x: Math.round(p.x), y: Math.round(p.y) });
-  lastX = p.x; lastY = p.y;
-}
-async function endDraw(e) {
-  if (!drawing) return; drawing = false;
-  if (!canvasOpen || strokePts.length < 1) return;
-  const pen = document.getElementById('penCol').value.replace('#', '');
-  const pts = strokePts.map(p => p.x + ',' + p.y).join(';');
-  await req('/draw/stroke?pen=' + pen + '&pts=' + encodeURIComponent(pts));
-  strokePts = [];
-}
-
-cvs.addEventListener('mousedown',  startDraw);
-cvs.addEventListener('mousemove',  moveDraw);
-cvs.addEventListener('mouseup',    endDraw);
-cvs.addEventListener('mouseleave', endDraw);
-cvs.addEventListener('touchstart', startDraw, {passive:false});
-cvs.addEventListener('touchmove',  moveDraw,  {passive:false});
-cvs.addEventListener('touchend',   endDraw);
-
-// Clear = clear both web canvas and display
-async function clearAll() {
-  const bg = document.getElementById('bgCol').value;
-  redrawCanvas(bg);
-  await req('/draw/clear?bg=' + encodeURIComponent(bg));
-  toast('cleared');
-}
-
-// Init: sync speed and backlight from ESP32, reset bg to default
+// ── Init: sync backlight / WiFi mode / IP from the device ───────
 (async () => {
-  let bgHex = '#da1100';
+  const st = document.getElementById('stat');
   try {
     const r = await fetch('/state');
     const j = await r.json();
-    // Sync speed
-    const spd = j.speed || 1;
-    document.getElementById('spd').value = spd;
-    document.getElementById('spdV').textContent = spdLabels[spd];
-    // Sync backlight
-    if (j.bl === false) {
-      blOn = false;
-      const b = document.getElementById('blBtn');
-      b.textContent = '\u25cb display off';
-      b.classList.remove('on'); b.classList.add('dim');
-    }
-    // Sync eye size sliders
-    if (j.eye) setEyeSliders(j.eye);
-    // Sync idle toggle
-    if (j.idle === false) {
-      idleOn = false;
-      const b = document.getElementById('idleBtn');
-      b.textContent = '\u25cb idle off';
-      b.classList.remove('on'); b.classList.add('dim');
-    }
-    if (j.bg) bgHex = j.bg;
-  } catch(e) {}
-  // Sync bg picker with the device's current animation background
-  document.getElementById('bgCol').value = bgHex;
-  redrawCanvas(bgHex);
+    if (j.bl === false) { blOn = false; paintBL(); }
+    const mode = (j.mode || 'ap').toUpperCase();
+    st.textContent = mode + ' \u00b7 ' + (j.ip || '?');
+  } catch(e) {
+    st.textContent = 'offline';
+  }
 })();
 </script>
+</body>
+</html>
+)rawhtml";
+
+// Minimal first-time WiFi provisioning form
+const char WIFI_HTML[] PROGMEM = R"rawhtml(<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WiFi 设置 · Clawd Mochi</title>
+<style>
+*{box-sizing:border-box}
+body{background:#1c1c20;color:#e8e4dc;font-family:'Courier New',monospace;
+  display:flex;flex-direction:column;align-items:center;padding:28px 16px;gap:14px}
+h1{font-size:16px;color:#c96a3e;letter-spacing:2px}
+p{font-size:11px;color:#8a8278;line-height:1.6;text-align:center;max-width:340px}
+form{width:100%;max-width:340px;display:flex;flex-direction:column;gap:12px}
+label{font-size:10px;color:#8a8278;letter-spacing:2px}
+input{background:#252428;border:1.5px solid #38343a;border-radius:9px;
+  color:#e8e4dc;font-family:inherit;font-size:14px;padding:11px;outline:none}
+input:focus{border-color:#c96a3e}
+button{background:#c96a3e;border:none;border-radius:9px;color:#1c1c20;
+  font-family:inherit;font-size:13px;font-weight:bold;padding:12px;cursor:pointer}
+a{color:#8a8278;font-size:11px}
+</style>
+</head>
+<body>
+<h1>WiFi 设置</h1>
+<p>输入 2.4GHz 家庭 WiFi，保存后设备会重启并连接。首次配网请连接热点 ClaWD-Mochi（密码 clawd1234）。</p>
+<form method="post" action="/wifi">
+  <label for="ssid">SSID</label>
+  <input id="ssid" name="ssid" maxlength="32" required autocomplete="off">
+  <label for="pass">PASSWORD</label>
+  <input id="pass" name="pass" type="password" maxlength="64" autocomplete="off">
+  <button type="submit">保存并重启</button>
+</form>
+<a href="/">返回控制器</a>
 </body>
 </html>
 )rawhtml";
@@ -1724,54 +1266,93 @@ void routeRoot() {
   server.send_P(200, "text/html", INDEX_HTML);
 }
 
-void routeCmd() {
-  noteActivity();
-  if (busy) {  // no reentry during blocking animations (e.g. animLogoReveal)
-    server.send(200, "application/json", "{\"busy\":1}");
+void routeWifiPage() {
+  server.sendHeader("Cache-Control", "no-store");
+  server.send_P(200, "text/html", WIFI_HTML);
+}
+
+void routeWifiSave() {
+  const String ssid = server.arg("ssid");
+  const String pass = server.arg("pass");
+  if (ssid.isEmpty()) {
+    server.send(400, "text/html", "<html><body>SSID required</body></html>");
     return;
   }
-  if (!server.hasArg("k") || server.arg("k").isEmpty()) {
-    server.send(400, "application/json", "{\"e\":1}"); return;
-  }
-  const String key = server.arg("k");
-  char c;
-  if      (key == "crying")      c = 'c';
-  else if (key == "shocked")     c = 'b';
-  else if (key == "cool")        c = 'v';
-  else if (key == "embarrassed") c = 'm';
-  else if (key == "delicious")   c = 'y';
-  else                          c = key[0];
+  saveWifiCreds(ssid, pass);
+  server.send(200, "text/html",
+              "<html><body>WiFi saved. Rebooting...</body></html>");
+  delay(500);   // let the response flush before the restart
+  ESP.restart();
+}
 
-  if (termMode) {
-    if (c == 'q') { termMode = false; drawCodeView(); }
-    server.send(200, "application/json", "{\"ok\":1}"); return;
+void routeHealth() {
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+// Explicit /cmd key table — single letters plus full-word aliases.
+// `n` is the silent "back to normal eyes" action (not an expression alias).
+struct KeyMap { const char *key; char code; };
+static const KeyMap KEY_MAP[] = {
+  {"w", 'w'}, {"normal", 'w'},
+  {"h", 'h'}, {"happy", 'h'},
+  {"z", 'z'}, {"sleepy", 'z'},
+  {"o", 'o'}, {"surprised", 'o'},
+  {"k", 'k'}, {"wink", 'k'},
+  {"x", 'x'}, {"dizzy", 'x'},
+  {"g", 'g'}, {"angry", 'g'},
+  {"l", 'l'}, {"heart", 'l'},
+  {"t", 't'}, {"think", 't'},
+  {"e", 'e'}, {"executing", 'e'},
+  {"c", 'c'}, {"crying", 'c'},
+  {"b", 'b'}, {"shocked", 'b'},
+  {"v", 'v'}, {"cool", 'v'},
+  {"m", 'm'}, {"embarrassed", 'm'},
+  {"y", 'y'}, {"delicious", 'y'},
+  {"s", 's'}, {"squish", 's'},
+  {"n", 'n'},
+};
+
+bool lookupKey(const String &key, char &code) {
+  for (uint8_t i = 0; i < sizeof(KEY_MAP) / sizeof(KEY_MAP[0]); i++) {
+    if (key == KEY_MAP[i].key) { code = KEY_MAP[i].code; return true; }
+  }
+  return false;
+}
+
+void routeCmd() {
+  server.sendHeader("Cache-Control", "no-store");
+  if (!server.hasArg("k") || server.arg("k").isEmpty()) {
+    server.send(400, "application/json", "{\"error\":\"unknown key\"}");
+    return;
+  }
+  char c = 0;
+  if (!lookupKey(server.arg("k"), c)) {
+    server.send(400, "application/json", "{\"error\":\"unknown key\"}");
+    return;
+  }
+  if (busy) {  // no reentry during blocking animations
+    server.send(409, "application/json", "{\"busy\":1}");
+    return;
+  }
+  noteActivity();
+
+  // Optional lease (ms) for temp expressions. `hold` is a compat alias;
+  // `lease` wins when both are present. Applied after startExpr().
+  uint32_t leaseMs = 0;
+  const char *leaseArg = nullptr;
+  if      (server.hasArg("lease")) leaseArg = "lease";
+  else if (server.hasArg("hold"))  leaseArg = "hold";
+  if (leaseArg) {
+    const long v = server.arg(leaseArg).toInt();
+    if (v > 0) leaseMs = (uint32_t)constrain(v, 500L, 1800000L);
   }
 
   server.send(200, "application/json", "{\"ok\":1}");
 
-  // Optional hold override (ms) for temp-expression keys, clamped 500..600000.
-  // Applied AFTER startExpr() so it wins over the built-in 5/6 s timers.
-  uint32_t holdMs = 0;
-  if (server.hasArg("hold")) {
-    const long h = server.arg("hold").toInt();
-    holdMs = (uint32_t)constrain(h, 500L, 600000L);
-  }
-
   switch (c) {
     case 'w': currentView = VIEW_EYES_NORMAL; currentExpr = EXPR_NORMAL; animNormalEyes(); break;
     case 's': currentView = VIEW_EYES_SQUISH; currentExpr = EXPR_SQUISH; animSquishEyes(); break;
-    case 'd':
-      currentView = VIEW_CODE; drawCodeView();
-      termMode = true; termClear(); termFullRedraw(); break;
-    case 'a':
-      currentView = VIEW_EYES_NORMAL;
-      currentExpr = EXPR_NORMAL;
-      animLogoReveal();
-      break;
-    case 'i':
-      currentView = VIEW_INFO; termMode = false;
-      drawInfoPage();
-      break;
     case 'h': startExpr(EXPR_HAPPY);     break;
     case 'z': startExpr(EXPR_SLEEPY);    break;
     case 'o': startExpr(EXPR_SURPRISED); break;
@@ -1787,9 +1368,8 @@ void routeCmd() {
     case 'm': startExpr(EXPR_EMBARRASSED); break;
     case 'y': startExpr(EXPR_DELICIOUS); break;
     case 'n':
-      // Silent restore to normal eyes — reuses exprTick's recovery path.
-      // No blocking animation; no-op outside the eye view (never yanks the
-      // user out of terminal / canvas / squish views).
+      // Silent restore to normal eyes — no blocking animation; does not
+      // yank the user out of the squish view.
       if (currentView == VIEW_EYES_NORMAL && currentExpr != EXPR_NORMAL) {
         currentExpr = EXPR_NORMAL;
         drawNormalEyes();
@@ -1799,21 +1379,14 @@ void routeCmd() {
       break;
   }
 
-  if (holdMs > 0 && c && strchr("hzokxgltecbvmy", c)) {
-    exprEndAt = millis() + holdMs;
+  if (leaseMs > 0 && strchr("hzokxgltecbvmy", c)) {
+    exprEndAt = millis() + leaseMs;
   }
-}
-
-void routeChar() {
-  noteActivity();
-  if (!termMode) { server.send(200, "application/json", "{\"ok\":1}"); return; }
-  const String val = server.arg("c");
-  if (val.length() > 0) termAddChar(val[0]);
-  server.send(200, "application/json", "{\"ok\":1}");
 }
 
 void routeSpeed() {
   noteActivity();
+  server.sendHeader("Cache-Control", "no-store");
   if (server.hasArg("v")) animSpeed = constrain(server.arg("v").toInt(), 1, 3);
   server.send(200, "application/json", "{\"ok\":1}");
 }
@@ -1821,6 +1394,7 @@ void routeSpeed() {
 // /eye — set eye geometry (w/h/gap/ox/oy), save=1 writes NVS, reset=1 restores defaults
 void routeEye() {
   noteActivity();
+  server.sendHeader("Cache-Control", "no-store");
   if (server.hasArg("reset") && server.arg("reset") == "1") {
     eyeW = 30; eyeH = 60; eyeGap = 120; eyeOx = 0; eyeOy = 40;
     clampEyeParams();
@@ -1840,6 +1414,7 @@ void routeEye() {
 // /idle?on=1|0 — toggle idle animation (persisted to NVS immediately)
 void routeIdle() {
   noteActivity();
+  server.sendHeader("Cache-Control", "no-store");
   if (server.hasArg("on")) {
     idleEnabled = (server.arg("on") == "1");
     prefs.begin("mochi", false);
@@ -1857,74 +1432,25 @@ void routeIdle() {
 // /redraw?bg=hex — set animBg and immediately redraw current view
 void routeRedraw() {
   noteActivity();
+  server.sendHeader("Cache-Control", "no-store");
   if (server.hasArg("bg")) {
     animBgColor = hexToRgb565(server.arg("bg"));
-    drawBgColor = animBgColor;
   }
-  switch (currentView) {
-    case VIEW_EYES_NORMAL:
-    case VIEW_EYES_SQUISH: drawCurrentExpr(); break;
-    case VIEW_CODE:        drawCodeView();   break;
-    case VIEW_INFO:        drawInfoPage();   break;
-    case VIEW_DRAW:        tft.fillScreen(drawBgColor); break;
-  }
-  server.send(200, "application/json", "{\"ok\":1}");
-}
-
-void routeCanvas() {
-  noteActivity();
-  const bool on = server.hasArg("on") && server.arg("on") == "1";
-  if (on) { currentView = VIEW_DRAW; tft.fillScreen(drawBgColor); }
-  server.send(200, "application/json", "{\"ok\":1}");
-}
-
-void routeDrawClear() {
-  noteActivity();
-  const String bg = server.hasArg("bg") ? server.arg("bg") : "#aa4818";
-  drawBgColor = hexToRgb565(bg);
-  animBgColor = drawBgColor;  // keep in sync
-  currentView = VIEW_DRAW; termMode = false;
-  tft.fillScreen(drawBgColor);
-  server.send(200, "application/json", "{\"ok\":1}");
-}
-
-void routeDrawStroke() {
-  noteActivity();
-  if (!server.hasArg("pts") || !server.hasArg("pen")) {
-    server.send(200, "application/json", "{\"ok\":1}"); return;
-  }
-  const uint16_t color = hexToRgb565(server.arg("pen"));
-  const String   data  = server.arg("pts");
-  currentView = VIEW_DRAW;
-
-  struct Pt { int16_t x, y; };
-  Pt prev = {-1, -1};
-  int start = 0;
-  while (start < (int)data.length()) {
-    int semi = data.indexOf(';', start);
-    if (semi == -1) semi = data.length();
-    String entry = data.substring(start, semi);
-    const int comma = entry.indexOf(',');
-    if (comma > 0) {
-      const int16_t x = entry.substring(0, comma).toInt();
-      const int16_t y = entry.substring(comma + 1).toInt();
-      if (prev.x >= 0) {
-        tft.drawLine(prev.x, prev.y, x, y, color);
-        tft.drawLine(prev.x + 1, prev.y, x + 1, y, color);
-        tft.drawLine(prev.x, prev.y + 1, x, y + 1, color);
-      } else {
-        tft.fillCircle(x, y, 2, color);
-      }
-      prev = {x, y};
-    }
-    start = semi + 1;
+  if (currentView == VIEW_EYES_NORMAL || currentView == VIEW_EYES_SQUISH) {
+    drawCurrentExpr();
   }
   server.send(200, "application/json", "{\"ok\":1}");
 }
 
 void routeBacklight() {
+  server.sendHeader("Cache-Control", "no-store");
+  if (!server.hasArg("on") ||
+      (server.arg("on") != "0" && server.arg("on") != "1")) {
+    server.send(400, "application/json", "{\"error\":\"on must be 0 or 1\"}");
+    return;
+  }
   noteActivity();
-  setBacklight(server.hasArg("on") && server.arg("on") == "1");
+  setBacklight(server.arg("on") == "1");
   server.send(200, "application/json", "{\"ok\":1}");
 }
 
@@ -1939,9 +1465,10 @@ String rgb565ToHex(uint16_t c) {
 }
 
 void routeState() {
+  server.sendHeader("Cache-Control", "no-store");
+  const bool staUp = WiFi.status() == WL_CONNECTED;
   String j = "{\"view\":"; j += currentView;
   j += ",\"busy\":";   j += busy        ? "true" : "false";
-  j += ",\"term\":";   j += termMode    ? "true" : "false";
   j += ",\"bl\":";     j += backlightOn ? "true" : "false";
   j += ",\"speed\":";  j += animSpeed;
   j += ",\"idle\":";   j += idleEnabled ? "true" : "false";
@@ -1952,13 +1479,14 @@ void routeState() {
   j += ",\"ox\":";     j += eyeOx;
   j += ",\"oy\":";     j += eyeOy;
   j += "}";
-  // Animation background as #RRGGBB — the web controller syncs its picker with it
+  // Animation background as #RRGGBB
   j += ",\"bg\":\"";  j += rgb565ToHex(animBgColor);
   // Link diagnostics — appended fields only, existing keys untouched
-  j += "\",\"mode\":\"";  j += staMode ? "sta" : "ap";
-  j += "\",\"ip\":\"";  j += (staMode ? WiFi.localIP() : WiFi.softAPIP()).toString();
+  j += "\",\"mode\":\"";  j += staUp ? "sta" : "ap";
+  j += "\",\"ip\":\"";  j += (staUp ? WiFi.localIP() : WiFi.softAPIP()).toString();
+  j += "\",\"hostname\":\"";  j += HOSTNAME;
   j += "\"";
-  if (staMode) {
+  if (staUp) {
     j += ",\"rssi\":";  j += String(WiFi.RSSI());
   }
   j += ",\"heap\":";    j += String((uint32_t)ESP.getFreeHeap());
@@ -1977,7 +1505,9 @@ void setup() {
   // Powered from a charger there is no USB host draining CDC writes.
   // Core default (HWCDC, 3.3.12) blocks up to 100 ms per write when the
   // TX buffer fills — cap it to zero so a stray print can never stall loop().
+#if ARDUINO_USB_CDC_ON_BOOT
   Serial.setTxTimeoutMs(0);
+#endif
 
   pinMode(TFT_BLK, OUTPUT);
   setBacklight(true);
@@ -2000,50 +1530,55 @@ void setup() {
   // ── Logo shown once at startup ─────────────────────────────
   animLogoReveal();
 
-  // ── Start WiFi (STA if enabled, else AP hotspot) ────────────
-#ifdef ENABLE_HOME_WIFI
-  drawWifiConnectPage();
+  // ── WiFi: STA-first, AP provisioning fallback ──────────────
   WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
+  WiFi.setHostname(HOSTNAME);
   WiFi.setSleep(false);
-  WiFi.config(IPAddress(SCREEN_IP), IPAddress(SCREEN_GW),
-              IPAddress(SCREEN_MASK), IPAddress(SCREEN_DNS));
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  const uint32_t wifiStart = millis();
-  while (WiFi.status() != WL_CONNECTED &&
-         (int32_t)(millis() - wifiStart) < (int32_t)STA_CONNECT_TIMEOUT_MS) {
-    delay(100);
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    staMode = true;                 // stay STA forever: watchdog reconnects
-    WiFi.setAutoReconnect(true);
+
+  String wifiSsid, wifiPass;
+  if (loadWifiCreds(wifiSsid, wifiPass)) {
+    drawWifiConnectPage();
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
+    const uint32_t wifiStart = millis();
+    while (WiFi.status() != WL_CONNECTED &&
+           (int32_t)(millis() - wifiStart) < (int32_t)STA_CONNECT_TIMEOUT_MS) {
+      delay(100);
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      staMode = true;
+      WiFi.setAutoReconnect(true);
+    } else {
+      // Keep the provisioning AP reachable while STA retries in AP+STA.
+      WiFi.mode(WIFI_AP_STA);
+      WiFi.softAP(AP_SSID, AP_PASS);
+      staMode = true;
+      apFallback = true;
+      wifiFailCount = 0;
+      WiFi.setAutoReconnect(true);
+      WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
+    }
   } else {
-    WiFi.mode(WIFI_AP);             // fallback: hotspot behaviour
+    WiFi.mode(WIFI_AP);               // first boot: provisioning hotspot
     WiFi.softAP(AP_SSID, AP_PASS);
     staMode = false;
   }
-#else
-  WiFi.persistent(false);
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASS);
-  staMode = false;
-#endif
+  startMdns();
   lastWifiCheckMs = millis();
 
   // ── Register routes BEFORE the info page so it can be
   //    dismissed early by any incoming request ─────────────────
-  server.on("/",            HTTP_GET, routeRoot);
-  server.on("/cmd",         HTTP_GET, routeCmd);
-  server.on("/char",        HTTP_GET, routeChar);
-  server.on("/speed",       HTTP_GET, routeSpeed);
-  server.on("/redraw",      HTTP_GET, routeRedraw);
-  server.on("/eye",         HTTP_GET, routeEye);
-  server.on("/idle",        HTTP_GET, routeIdle);
-  server.on("/canvas",      HTTP_GET, routeCanvas);
-  server.on("/draw/clear",  HTTP_GET, routeDrawClear);
-  server.on("/draw/stroke", HTTP_GET, routeDrawStroke);
-  server.on("/backlight",   HTTP_GET, routeBacklight);
-  server.on("/state",       HTTP_GET, routeState);
+  server.on("/",            HTTP_GET,  routeRoot);
+  server.on("/cmd",         HTTP_GET,  routeCmd);
+  server.on("/wifi",        HTTP_GET,  routeWifiPage);
+  server.on("/wifi",        HTTP_POST, routeWifiSave);
+  server.on("/health",      HTTP_GET,  routeHealth);
+  server.on("/speed",       HTTP_GET,  routeSpeed);
+  server.on("/redraw",      HTTP_GET,  routeRedraw);
+  server.on("/eye",         HTTP_GET,  routeEye);
+  server.on("/idle",        HTTP_GET,  routeIdle);
+  server.on("/backlight",   HTTP_GET,  routeBacklight);
+  server.on("/state",       HTTP_GET,  routeState);
   server.onNotFound(routeNotFound);
   server.begin();
 
@@ -2056,10 +1591,15 @@ void setup() {
     delay(10);
   }
 
-  // ── Wake up: eyes view, one wiggle+blink, then idle takes over ──
-  currentView = VIEW_EYES_NORMAL;
-  currentExpr = EXPR_NORMAL;
-  animNormalEyes();
+  // ── Wake up: one wiggle+blink, unless a command arrived while
+  //    the info page was visible (then keep its result on screen) ──
+  if (!bootRequestSeen) {
+    currentView = VIEW_EYES_NORMAL;
+    currentExpr = EXPR_NORMAL;
+    animNormalEyes();
+  } else if (!busy) {
+    drawCurrentExpr();
+  }
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -2068,10 +1608,24 @@ void setup() {
 
 void loop() {
   // STA watchdog: non-blocking reconnect attempt every 10 s on drop.
+  // After 3 consecutive failures the AP is brought up once as a provisioning
+  // fallback; reconnects keep running and the AP stays available.
   if (staMode &&
       (int32_t)(millis() - lastWifiCheckMs) >= (int32_t)WIFI_WATCHDOG_MS) {
     lastWifiCheckMs = millis();
-    if (WiFi.status() != WL_CONNECTED) WiFi.reconnect();
+    if (WiFi.status() != WL_CONNECTED) {
+      if (wifiFailCount < 3) wifiFailCount++;
+      if (wifiFailCount >= 3 && !apFallback) {
+        WiFi.mode(WIFI_AP_STA);
+        WiFi.softAP(AP_SSID, AP_PASS);
+        apFallback = true;
+        MDNS.end();
+        startMdns();
+      }
+      WiFi.reconnect();
+    } else {
+      wifiFailCount = 0;
+    }
   }
   server.handleClient();
   exprTick();
