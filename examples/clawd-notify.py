@@ -5,10 +5,11 @@ Claude Code hooks pass a JSON payload on stdin (fields include
 ``hook_event_name``, ``session_id``, ``tool_name``). This script maps the
 event to an expression key and calls the device:
 
-    GET http://<device>/cmd?k=<key>
+    GET http://<device>/cmd?k=<key>[&lease=<ms>]
 
 Device address comes from the ``CLAWD_URL`` environment variable and
-defaults to the standalone AP hotspot (http://192.168.4.1).
+defaults to the mDNS name ``http://clawd-mochi.local``. For first-boot AP
+provisioning, set ``CLAWD_URL=http://192.168.4.1``.
 
 Wire it up in ``~/.claude/settings.json``, e.g. for every tool call:
 
@@ -23,26 +24,48 @@ Wire it up in ``~/.claude/settings.json``, e.g. for every tool call:
       }
     }
 
-The script never blocks Claude Code: 2 s network timeout, all errors
-ignored (an offline device must not slow down your session).
+The script uses a short 0.4 s network timeout so an offline or busy device
+cannot stall the session. A 409 (device busy) is retried once after ~250 ms;
+all other errors are ignored.
 """
 
 import json
 import os
 import sys
+import time
+import urllib.error
 import urllib.request
 
-# Claude Code hook event -> expression key (see the README table for faces)
-EVENT_KEYS = {
-    "UserPromptSubmit": "t",      # think
-    "PreToolUse": "e",            # executing
-    "PostToolUseFailure": "x",    # dizzy
-    "SubagentStart": "t",         # think
-    "PermissionRequest": "m",     # embarrassed (asking for permission)
-    "Stop": "l",                  # heart (task done)
-    "StopFailure": "c",           # crying (task failed)
-    "SessionEnd": "n",            # silently back to normal eyes
+# Claude Code hook event -> expression query (see the README table for faces).
+# `lease` keeps long-running states on screen (500..1800000 ms on the device).
+EVENT_ACTIONS = {
+    "UserPromptSubmit": "t&lease=600000",       # think
+    "PreToolUse": "e&lease=1800000",            # executing
+    "PostToolUse": "t&lease=600000",            # think
+    "SubagentStart": "t&lease=600000",          # think
+    "SubagentStop": "t&lease=600000",           # main agent resumes thinking
+    "PostToolUseFailure": "x",                  # dizzy
+    "PermissionRequest": "m&lease=600000",      # embarrassed / asking
+    "Notification": "m&lease=600000",           # embarrassed / attention
+    "Stop": "l",                                # heart (task done)
+    "StopFailure": "c",                         # crying (task failed)
+    "SessionEnd": "n",                          # back to normal eyes
 }
+
+TIMEOUT_S = 0.4
+BUSY_RETRY_DELAY_S = 0.25
+
+
+def send(url: str):
+    """Return the HTTP status, or None on any network error."""
+    try:
+        with urllib.request.urlopen(url, timeout=TIMEOUT_S) as resp:
+            resp.read()
+            return resp.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except Exception:
+        return None
 
 
 def main() -> int:
@@ -51,16 +74,16 @@ def main() -> int:
     except Exception:
         payload = {}
 
-    key = EVENT_KEYS.get(payload.get("hook_event_name", ""))
-    if not key:
+    action = EVENT_ACTIONS.get(payload.get("hook_event_name", ""))
+    if not action:
         return 0
 
-    base = os.environ.get("CLAWD_URL", "http://192.168.4.1").rstrip("/")
-    try:
-        with urllib.request.urlopen(f"{base}/cmd?k={key}", timeout=2) as resp:
-            resp.read()
-    except Exception:
-        pass
+    base = os.environ.get("CLAWD_URL", "http://clawd-mochi.local").rstrip("/")
+    url = f"{base}/cmd?k={action}"
+
+    if send(url) == 409:
+        time.sleep(BUSY_RETRY_DELAY_S)
+        send(url)
     return 0
 
 
