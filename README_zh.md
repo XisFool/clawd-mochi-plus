@@ -1,6 +1,6 @@
 # Clawd Mochi Plus
 
-**Clawd Mochi 桌面宠物的增强版开源固件** —— 15 种参数化几何表情、运行时可调的几何缩放引擎、仿真 Idle 生命状态机、零配置双模 WiFi。无位图素材、无私有配置文件，打开即可编译烧录。
+**Clawd Mochi 桌面宠物的增强版开源固件** —— 15 种参数化几何表情、运行时可调的几何缩放引擎、仿真 Idle 生命状态机、STA 优先 + AP 配网 WiFi。无位图素材、无私有配置文件，打开即可编译烧录。
 
 本项目源自 [yousifamanuel/clawd-mochi](https://github.com/yousifamanuel/clawd-mochi)（MIT 许可）的独立固件增强分支，在保持原版硬件方案与开箱即用体验的基础上，为现代 AI 编程助手场景补充了一整套表情系统。
 
@@ -16,8 +16,8 @@
 - **15 种纯数学几何表情** —— 全部基于 `(eyeW, eyeH, eyeGap, eyeOx, eyeOy)` 在运行时用 `Adafruit_GFX` 图元实时绘制。零 ROM 位图、零内存帧缓冲。
 - **自适应几何引擎** —— 通过 `/eye` HTTP 接口调节眼睛宽高、间距与偏移，15 种表情自动等比缩放；显式 `save=1` 才写入 NVS 持久化。
 - **仿真 Idle 生命感** —— 2.5~6 秒随机眨眼、6~15 秒随机左右环视、每 30~60 秒一次短暂的 `> <` 眯眼、5 分钟无操作自动进入横条 + zZ 小憩。
-- **零门槛双模 WiFi** —— 默认原版 AP 热点开箱即用（`ClaWD-Mochi` / `clawd1234` / `192.168.4.1`）；取消注释一个宏即可切换为家庭局域网静态 IP。
-- **内置网页控制器** —— 设备自带移动端页面：表情矩阵、几何滑块、调色板、终端视图、画板。
+- **STA 优先 + AP 配网** —— 首次开机启动 `ClaWD-Mochi` 热点（`clawd1234` / `http://192.168.4.1`）；打开 `/wifi` 填写 2.4GHz 家庭网络，凭据存入 NVS，重启后接入局域网并通过 mDNS 提供 `http://clawd-mochi.local`。开机连接失败会保持 AP 并继续以 AP+STA 重试；运行期连续 3 次重连失败也会重新拉起 AP 作为配网兜底。
+- **极简内置网页控制器** —— 设备自带移动端页面：15 个表情按钮、AP/STA 连接状态、背光开关、`WiFi 设置` 入口；`/eye` 几何接口仍保留在 HTTP API 中。
 - **离线逐帧预览器** —— `preview.html` 回放固件渲染的全部 15 种表情帧，支持播放/暂停与单帧步进。纯本地运行，无 CDN 依赖。
 
 ## 硬件
@@ -53,7 +53,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadS
 arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadSpeed=921600 -p COM<端口> clawd_mochi
 ```
 
-默认编译**不需要任何配置文件**，直接以 AP 热点启动。没有 `#error` 拦截，也不需要创建 `wifi_config.h`。
+默认编译**不需要任何配置文件**，首次启动即为 AP 配网热点。没有 `#error` 拦截，也不需要创建 `wifi_config.h`。
 
 ## 表情一览
 
@@ -81,32 +81,34 @@ arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadS
 
 **挤压眼（`s`）** —— 经典的 `> <` 视图 —— 是**独立常驻视图**，不计入 15 种表情；切换过去后会一直停留，直到手动切换。
 
-`/cmd?k=` 还接受这些视图按键：`s` 挤压眼视图、`d` 终端视图、`q` 退出终端、`i` WiFi 信息页、`a` 重播 logo 动画、`n` 静默恢复普通脸（不打断当前视图）。
+`/cmd?k=` 接受上表的单字母按键与完整单词别名：`normal`、`happy`、`sleepy`、`surprised`、`wink`、`dizzy`、`angry`、`heart`、`think`、`executing`、`crying`、`shocked`、`cool`、`embarrassed`、`delicious`、`squish`；`n` 用于在普通视图静默恢复普通脸，不会退出挤压眼视图。未知或空 key 返回 HTTP **400** `{"error":"unknown key"}`；阻塞动画播放期间返回 HTTP **409** `{"busy":1}`。
 
-临时表情 5 秒后自动恢复（思考为 6 秒）；用 `/cmd?k=t&hold=30000`（500~600000 ms）可延长时间。
+临时表情 5 秒后自动恢复（思考为 6 秒）；用 `lease=<ms>`（500~1800000，最长 30 分钟）可延长，`hold` 为兼容别名，两者同时存在时 `lease` 优先。普通眼与挤压眼不受 lease 影响。
 
 ## REST API
 
-访问地址：`http://192.168.4.1`（AP 模式）或你配置的静态 IP（STA 模式）。以下接口均返回 JSON。
+访问地址：`http://192.168.4.1`（AP 模式）或 `http://clawd-mochi.local` / 路由器分配的 IP（STA 模式）。以下接口均返回 JSON（`/wifi` 页面除外）。
 
 | 接口 | 用途 |
 | --- | --- |
-| `/cmd?k=<key>` | 触发表情按键或别名（见上表）。临时表情可加 `hold=<ms>`。回复 `busy:1` 表示当前有阻塞动画在播放。 |
+| `/cmd?k=<key>` | 触发表情按键或别名（见上表）。临时表情可加 `lease=<ms>`（500~1800000），`hold` 为兼容别名。未知 key 返回 HTTP 400；阻塞动画期间返回 HTTP 409 + `busy:1`。 |
 | `/eye?w=&h=&gap=&ox=&oy=` | 调节眼宽/眼高/眼距/水平偏移/垂直偏移。加 `save=1` 写入 NVS 持久化；`reset=1` 恢复默认。 |
-| `/state` | 当前视图、表情、idle/背光状态、眼部几何参数、动画背景色（`bg`）、WiFi 模式（`ap`/`sta`）、IP、RSSI（仅 STA 模式）、剩余堆内存。 |
+| `/state` | 当前视图、表情、idle/背光状态、眼部几何参数、动画背景色（`bg`）、WiFi 模式（`ap`/`sta`）、IP、hostname、RSSI（仅 STA 模式）、剩余堆内存；带 `Cache-Control: no-store`。 |
+| `/wifi` | `GET` 返回配网表单；`POST ssid=&pass=` 保存到 NVS 并重启。SSID 为空返回 HTTP 400。 |
+| `/health` | `{"ok":true}`，带 `Cache-Control: no-store`。 |
 | `/idle?on=1\|0` | 开/关 Idle 生命机能（立即持久化）。 |
 | `/speed?v=1\|2\|3` | 动画速度：1 = 慢（默认），2 = 正常，3 = 快。 |
 | `/backlight?on=1\|0` | 屏幕背光开/关。 |
 | `/redraw?bg=<RRGGBB>` | 设置动画背景色并立即重绘。 |
-| `/canvas`、`/draw/clear`、`/draw/stroke` | 手绘画板（网页控制器使用）。 |
-| `/char` | 渲染单个字符（网页控制台视图）。 |
 
 示例：
 
 ```bash
 curl "http://192.168.4.1/cmd?k=crying"
+curl "http://192.168.4.1/cmd?k=e&lease=1800000"
 curl "http://192.168.4.1/eye?w=36&h=72&gap=128&oy=36&save=1"
 curl "http://192.168.4.1/state"
+curl "http://192.168.4.1/health"
 ```
 
 ## 接入 Claude Code 示例
@@ -120,16 +122,19 @@ curl "http://192.168.4.1/cmd?k=l"   # 爱心 —— 全部完成
 
 `examples/clawd-notify.py` 把 Claude Code 的 hook 事件映射为表情。推荐映射（可自行修改）：
 
-| Claude Code hook 事件 | 按键 | 表情 |
-| --- | :-: | --- |
-| `UserPromptSubmit` | `t` | 思考 |
-| `PreToolUse` | `e` | 执行中 |
-| `PostToolUseFailure` | `x` | 晕眩 |
-| `SubagentStart` | `t` | 思考 |
-| `PermissionRequest` | `m` | 害羞 |
-| `Stop` | `l` | 爱心 |
-| `StopFailure` | `c` | 哭泣 |
-| `SessionEnd` | `n` | 恢复普通 |
+| Claude Code hook 事件 | 按键 | Lease (ms) | 表情 |
+| --- | :-: | ---: | --- |
+| `UserPromptSubmit` | `t` | 600000 | 思考 |
+| `PreToolUse` | `e` | 1800000 | 执行中 |
+| `PostToolUse` | `t` | 600000 | 思考 |
+| `SubagentStart` | `t` | 600000 | 思考 |
+| `SubagentStop` | `t` | 600000 | 思考 |
+| `PostToolUseFailure` | `x` | — | 晕眩 |
+| `PermissionRequest` | `m` | 600000 | 害羞 |
+| `Notification` | `m` | 600000 | 害羞 |
+| `Stop` | `l` | — | 爱心 |
+| `StopFailure` | `c` | — | 哭泣 |
+| `SessionEnd` | `n` | — | 恢复普通 |
 
 在 Claude Code 的 `settings.json`（`hooks` 段）中接入该脚本，例如每次工具调用时：
 
@@ -145,32 +150,26 @@ curl "http://192.168.4.1/cmd?k=l"   # 爱心 —— 全部完成
 }
 ```
 
-设备不在默认 AP 地址时，设置环境变量 `CLAWD_URL`。脚本不会拖慢 Claude Code：2 秒网络超时，连接失败直接忽略。
+脚本默认访问 `http://clawd-mochi.local`。如果 mDNS 不可用，设置环境变量 `CLAWD_URL` 为设备 IP（例如首次 AP 配网时的 `http://192.168.4.1`）。脚本使用 0.4 秒网络超时；收到 409（设备忙）会等待约 250 ms 重试一次，其余连接错误直接忽略。
 
 ## WiFi 模式
 
-**默认 —— 独立热点（零配置）**。设备开箱以 AP 模式启动：
+**首次开机 / 无凭据 —— 配网热点。** 设备以 AP 模式启动：
 
 - SSID `ClaWD-Mochi`，密码 `clawd1234`，网页地址 `http://192.168.4.1`
+- 打开 `http://192.168.4.1/wifi`，填写 2.4GHz SSID 与密码并提交；凭据写入 NVS（`Preferences`，命名空间 `wifi`），随后设备自动重启。
 
-**可选 —— 家庭局域网（STA 静态 IP）**。在 `clawd_mochi.ino` 中取消注释 `#define ENABLE_HOME_WIFI` 并填写：
+**配网后 —— 家庭局域网（STA）。** 设备以 station 模式启动、通过 DHCP 获取地址，并用 mDNS 广播 `http://clawd-mochi.local`。开机最多等待 15 秒；连接失败会以 AP+STA 模式拉起 AP 热点并继续重试，便于重新配网。
 
-```cpp
-#define WIFI_SSID   "Your-WiFi-SSID"
-#define WIFI_PASS   "Your-WiFi-Password"
-#define SCREEN_IP   192,168,1,200
-#define SCREEN_GW   192,168,1,1
-#define SCREEN_MASK 255,255,255,0
-#define SCREEN_DNS  192,168,1,1
-```
+**运行期回退。** 每 10 秒巡检一次，掉线调用 `WiFi.reconnect()`；连续 3 次失败后切换为 `WIFI_AP_STA` 并只拉起一次热点（不会重复 `softAP`），同时继续重连家庭网络。STA 恢复期间 AP 仍可通过 `192.168.4.1` 访问。
 
-STA 注意事项：仅支持 2.4GHz 网络；静态 IP 请选路由器 DHCP 地址池之外的空闲地址；开机等待连接最长 15 秒，失败自动回退 AP 模式；连接成功后每 10 秒巡检，掉线自动重连、不再回退 AP。
+说明：仅支持 2.4GHz 网络；不再提供静态 IP 配置，地址由路由器 DHCP 分配；mDNS 为尽力而为，初始化失败不会阻塞启动。
 
 ## 离线预览器（`preview.html`）
 
 双击 `preview.html` 即可 —— 单文件 HTML5 播放器，内置全部表情由固件逐帧渲染的结果。支持播放/暂停、单帧步进，并显示每种表情的帧数与周期。完全本地：无 CDN、无构建步骤、无网络请求。
 
-说明：预览帧为预生成 PNG 矩阵，不会响应 `/eye` 几何调整；需要实时调参请使用设备内置网页控制器。
+说明：预览帧为预生成 PNG 矩阵，不会响应 `/eye` 几何调整；需要实时调参请直接调用 `/eye` HTTP 接口。
 
 ## 项目结构
 
@@ -191,6 +190,6 @@ clawd-mochi-plus/
 ## 致谢与许可
 
 - 原项目：[yousifamanuel/clawd-mochi](https://github.com/yousifamanuel/clawd-mochi) —— 硬件方案、基础固件、3D 外壳（[MakerWorld](https://makerworld.com/en/models/2559505-clawd-mochi-physical-claude-code-mascot#profileId-2820000)）。
-- Clawd Mochi Plus：表情引擎、自适应几何、Idle 状态机、双模 WiFi、离线预览器。
+- Clawd Mochi Plus：表情引擎、自适应几何、Idle 状态机、STA 优先 + AP 配网 WiFi、离线预览器。
 
 MIT 许可 —— 见 [LICENSE](LICENSE)。
