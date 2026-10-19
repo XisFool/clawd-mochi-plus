@@ -31,6 +31,8 @@ This project is an independent firmware enhancement derived from [yousifamanuel/
 > ⚠️ **Electrical safety**: the display VCC must go to **3.3 V only** — connecting 5 V can destroy the panel.
 >
 > ⚠️ **SPI pins**: use GPIO 8/10 for SCK/MOSI. Do **not** use GPIO 6/7 (they are reserved for the SPI flash on many C3 modules and will brick the boot).
+>
+> ⚠️ **WiFi TX power**: the firmware sets the radio to **8.5 dBm** at boot (`WiFi.setTxPower()` re-applied after every `WiFi.mode()` — the call is a no-op before the radio starts). Cheap ESP32-C3 Super Mini boards are known to emit a degraded spectrum at the default max TX power: APs cannot hear auth/assoc frames (`AUTH_EXPIRE`), and the provisioning AP beacon becomes unreliable/invisible. Verified 2026-10-19: at 8.5 dBm both STA and soft-AP connect and hold reliably. If your board has a proper antenna, you may raise `WIFI_POWER_8_5dBm` in `clawd_mochi.ino` for extra range.
 
 3D-printed case: see the original author's model on MakerWorld — [Clawd Mochi physical Claude Code mascot](https://makerworld.com/en/models/2559505-clawd-mochi-physical-claude-code-mascot#profileId-2820000). This repository intentionally ships **no STL/3MF files** — print the original case and drop this firmware in.
 

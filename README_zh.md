@@ -31,6 +31,8 @@
 > ⚠️ **电气安全**：屏幕 VCC 只能接 **3.3V**，接 5V 可能烧毁屏幕。
 >
 > ⚠️ **SPI 引脚约束**：SCK/MOSI 必须用 GPIO 8/10，切勿使用 GPIO 6/7（多数 C3 模组该脚接内部 SPI Flash，接错会导致无法启动）。
+>
+> ⚠️ **WiFi 发射功率**：固件开机即把射频设为 **8.5 dBm**（在每个 `WiFi.mode()` 之后调用 `WiFi.setTxPower()`；该 API 在 WiFi 栈启动前调用会被静默忽略）。廉价 ESP32-C3 Super Mini 在默认满功率下发射频谱劣化，路由器收不到认证帧（AUTH_EXPIRE），软 AP 信标同样受损、热点时隐时现。2026-10-19 实测：8.5 dBm 下 STA 与软 AP 均稳定连接。若你使用天线更好的其他板卡，可上调 `clawd_mochi.ino` 中的 `WIFI_POWER_8_5dBm` 换取更大射程。
 
 3D 打印外壳：请使用原作者在 MakerWorld 的模型 —— [Clawd Mochi physical Claude Code mascot](https://makerworld.com/en/models/2559505-clawd-mochi-physical-claude-code-mascot#profileId-2820000)。本仓库有意**不附带 STL/3MF 文件**：打印原版外壳，刷入本固件即可。
 

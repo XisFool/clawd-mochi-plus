@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `examples/clawd-notify.py`: 0.4 s timeout and lease-aware hook mapping.
 - Boot no longer overrides a command received while the info page is visible.
 
+### Fixed
+
+- WiFi now boots at 8.5 dBm TX power, re-applied after every `WiFi.mode()`
+  switch (`setTxPower()` is a no-op before the radio starts). Cheap
+  ESP32-C3 Super Mini boards emit a degraded spectrum at the default max
+  power: APs cannot hear auth/assoc frames (AUTH_EXPIRE / ASSOC_EXPIRE /
+  HANDSHAKE_TIMEOUT), and the provisioning AP beacon becomes unreliable or
+  invisible. Verified 2026-10-19: STA and soft-AP connect and hold
+  reliably at 8.5 dBm.
+
 ### Removed
 
 - Runtime AP fallback after three failed reconnects; the 10 s watchdog now

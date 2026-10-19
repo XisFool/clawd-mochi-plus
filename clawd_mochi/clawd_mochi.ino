@@ -1437,6 +1437,11 @@ void setup() {
   animLogoReveal();
 
   // ── WiFi: STA-first, AP provisioning fallback ──────────────
+  // NOTE: WiFi.setTxPower() is a no-op before the radio starts, so it is
+  // re-applied after every WiFi.mode() switch below. ESP32-C3 Super Mini RF
+  // workaround: at default max TX power the spectrum is degraded and APs
+  // cannot hear auth/assoc frames (AUTH_EXPIRE); verified 2026-10-19 that
+  // 8.5 dBm connects reliably (STA and softAP).
   WiFi.persistent(false);
   WiFi.setHostname(HOSTNAME);
   WiFi.setSleep(false);
@@ -1445,6 +1450,7 @@ void setup() {
   if (loadWifiCreds(wifiSsid, wifiPass)) {
     drawWifiConnectPage();
     WiFi.mode(WIFI_STA);
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
     WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
     const uint32_t wifiStart = millis();
     while (WiFi.status() != WL_CONNECTED &&
@@ -1455,6 +1461,7 @@ void setup() {
       // Keep the provisioning AP reachable while STA retries in AP+STA.
       WiFi.mode(WIFI_AP_STA);
       WiFi.softAP(AP_SSID, AP_PASS);
+      WiFi.setTxPower(WIFI_POWER_8_5dBm);  // re-apply after mode switch
       // Kick STA again after the mode switch; auto-reconnect is on by default.
       WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
     }
@@ -1462,6 +1469,7 @@ void setup() {
   } else {
     WiFi.mode(WIFI_AP);               // first boot: provisioning hotspot
     WiFi.softAP(AP_SSID, AP_PASS);
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
     staMode = false;
   }
   startMdns();
