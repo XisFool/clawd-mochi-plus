@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is sent with `Cache-Control: no-store`.
 - `examples/clawd-notify.py`: 0.4 s timeout and lease-aware hook mapping.
 - Boot no longer overrides a command received while the info page is visible.
+- Docs: `README.md` is now Chinese (the file GitHub renders by default); the
+  English version moved to `README_en.md` and `README_zh.md` was retired.
+  `AGENTS.md` is now tracked in the repository.
 
 ### Fixed
 

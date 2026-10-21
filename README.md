@@ -1,109 +1,109 @@
 # Clawd Mochi Plus
 
-**An enhanced open-source firmware for the Clawd Mochi desk companion** — 15 parametric geometric expressions, a runtime-adjustable eye geometry engine, an idle life state machine, and STA-first WiFi with AP provisioning. No bitmap assets, no private config files; open, compile, and flash.
+**Clawd Mochi 桌面宠物的增强版开源固件** —— 15 种参数化几何表情、运行时可调的几何缩放引擎、仿真 Idle 生命状态机、STA 优先 + AP 配网 WiFi。无位图素材、无私有配置文件，打开即可编译烧录。
 
-This project is an independent firmware enhancement derived from [yousifamanuel/clawd-mochi](https://github.com/yousifamanuel/clawd-mochi) (MIT). It keeps the original hardware target and instant-on experience while adding a richer expression system for modern AI coding companions.
+本项目源自 [yousifamanuel/clawd-mochi](https://github.com/yousifamanuel/clawd-mochi)（MIT 许可）的独立固件增强分支，在保持原版硬件方案与开箱即用体验的基础上，为现代 AI 编程助手场景补充了一整套表情系统。
 
-<p align="center"><img src="docs/images/expressions-demo.gif" alt="Clawd Mochi Plus expression demo — all 15 faces"></p>
+<p align="center"><img src="docs/images/expressions-demo.gif" alt="Clawd Mochi Plus 表情演示 —— 全部 15 种表情"></p>
 
-- 🇨🇳 中文文档: [README_zh.md](README_zh.md)
-- 🎬 Offline preview: open `preview.html` in any browser (no hardware needed)
+- 🇬🇧 English: [README_en.md](README_en.md)
+- 🎬 离线预览：任意浏览器打开 `preview.html`，无需硬件
 
 ---
 
-## Features
+## 特性
 
-- **15 expressions, pure math** — every expression is drawn at runtime from `(eyeW, eyeH, eyeGap, eyeOx, eyeOy)` with `Adafruit_GFX` primitives. Zero ROM bitmaps, zero RAM frame buffers.
-- **Adaptive geometry engine** — resize/reposition the eyes via the `/eye` HTTP API; all 15 expressions rescale proportionally. Values persist to NVS with an explicit `save=1`.
-- **Idle life machine** — randomized blinking (2.5–6 s), random left/right glances (6–15 s), a brief `> <` squint every 30–60 s, and a 5-minute nap (`ZZ` + dozing bars) after inactivity.
-- **STA-first WiFi with AP provisioning** — first boot starts the `ClaWD-Mochi` hotspot (`clawd1234` / `http://192.168.4.1`). Enter your 2.4 GHz credentials at `/wifi`; they persist in NVS and the device joins your network as `http://clawd-mochi.local` via mDNS. If boot cannot connect, the AP stays up and STA keeps retrying in AP+STA.
-- **Minimal built-in web controller** — mobile-friendly page on the device: 15 expression buttons, AP/STA link status, backlight toggle, and a `WiFi 设置` link. The `/eye` geometry API remains available over HTTP.
-- **Offline frame-accurate preview** — `preview.html` replays firmware-rendered frames of all 15 expressions with play/pause and step-frame controls. Pure local, no CDN.
+- **15 种纯数学几何表情** —— 全部基于 `(eyeW, eyeH, eyeGap, eyeOx, eyeOy)` 在运行时用 `Adafruit_GFX` 图元实时绘制。零 ROM 位图、零内存帧缓冲。
+- **自适应几何引擎** —— 通过 `/eye` HTTP 接口调节眼睛宽高、间距与偏移，15 种表情自动等比缩放；显式 `save=1` 才写入 NVS 持久化。
+- **仿真 Idle 生命感** —— 2.5~6 秒随机眨眼、6~15 秒随机左右环视、每 30~60 秒一次短暂的 `> <` 眯眼、5 分钟无操作自动进入横条 + zZ 小憩。
+- **STA 优先 + AP 配网** —— 首次开机启动 `ClaWD-Mochi` 热点（`clawd1234` / `http://192.168.4.1`）；打开 `/wifi` 填写 2.4GHz 家庭网络，凭据存入 NVS，重启后接入局域网并通过 mDNS 提供 `http://clawd-mochi.local`。开机连接失败会保持 AP 并继续以 AP+STA 重试。
+- **极简内置网页控制器** —— 设备自带移动端页面：15 个表情按钮、AP/STA 连接状态、背光开关、`WiFi 设置` 入口；`/eye` 几何接口仍保留在 HTTP API 中。
+- **离线逐帧预览器** —— `preview.html` 回放固件渲染的全部 15 种表情帧，支持播放/暂停与单帧步进。纯本地运行，无 CDN 依赖。
 
-## Hardware
+## 硬件
 
-| Part | Detail |
+| 部件 | 说明 |
 | --- | --- |
-| MCU | ESP32-C3 Super Mini (ESP32-C3, 160 MHz) |
-| Display | 1.54" ST7789 SPI TFT, 240×240, 3.3 V logic |
-| Wiring | SDA→GPIO 10 (MOSI), SCL→GPIO 8 (SCK), RST→GPIO 2, DC→GPIO 1, CS→GPIO 4, BL→GPIO 3, VCC→**3.3 V**, GND→GND |
+| 主控 | ESP32-C3 Super Mini（160 MHz） |
+| 屏幕 | 1.54 寸 ST7789 SPI TFT，240×240，3.3V 逻辑 |
+| 接线 | SDA→GPIO 10 (MOSI)，SCL→GPIO 8 (SCK)，RST→GPIO 2，DC→GPIO 1，CS→GPIO 4，BL→GPIO 3，VCC→**3.3V**，GND→GND |
 
-> ⚠️ **Electrical safety**: the display VCC must go to **3.3 V only** — connecting 5 V can destroy the panel.
+> ⚠️ **电气安全**：屏幕 VCC 只能接 **3.3V**，接 5V 可能烧毁屏幕。
 >
-> ⚠️ **SPI pins**: use GPIO 8/10 for SCK/MOSI. Do **not** use GPIO 6/7 (they are reserved for the SPI flash on many C3 modules and will brick the boot).
+> ⚠️ **SPI 引脚约束**：SCK/MOSI 必须用 GPIO 8/10，切勿使用 GPIO 6/7（多数 C3 模组该脚接内部 SPI Flash，接错会导致无法启动）。
 >
-> ⚠️ **WiFi TX power**: the firmware sets the radio to **8.5 dBm** at boot (`WiFi.setTxPower()` re-applied after every `WiFi.mode()` — the call is a no-op before the radio starts). Cheap ESP32-C3 Super Mini boards are known to emit a degraded spectrum at the default max TX power: APs cannot hear auth/assoc frames (`AUTH_EXPIRE`), and the provisioning AP beacon becomes unreliable/invisible. Verified 2026-10-19: at 8.5 dBm both STA and soft-AP connect and hold reliably. If your board has a proper antenna, you may raise `WIFI_POWER_8_5dBm` in `clawd_mochi.ino` for extra range.
+> ⚠️ **WiFi 发射功率**：固件开机即把射频设为 **8.5 dBm**（在每个 `WiFi.mode()` 之后调用 `WiFi.setTxPower()`；该 API 在 WiFi 栈启动前调用会被静默忽略）。廉价 ESP32-C3 Super Mini 在默认满功率下发射频谱劣化，路由器收不到认证帧（AUTH_EXPIRE），软 AP 信标同样受损、热点时隐时现。2026-10-19 实测：8.5 dBm 下 STA 与软 AP 均稳定连接。若你使用天线更好的其他板卡，可上调 `clawd_mochi.ino` 中的 `WIFI_POWER_8_5dBm` 换取更大射程。
 
-3D-printed case: see the original author's model on MakerWorld — [Clawd Mochi physical Claude Code mascot](https://makerworld.com/en/models/2559505-clawd-mochi-physical-claude-code-mascot#profileId-2820000). This repository intentionally ships **no STL/3MF files** — print the original case and drop this firmware in.
+3D 打印外壳：请使用原作者在 MakerWorld 的模型 —— [Clawd Mochi physical Claude Code mascot](https://makerworld.com/en/models/2559505-clawd-mochi-physical-claude-code-mascot#profileId-2820000)。本仓库有意**不附带 STL/3MF 文件**：打印原版外壳，刷入本固件即可。
 
-## Build & Flash
+## 编译与烧录
 
-**Option A — Arduino IDE 2.x**
+**方式一 —— Arduino IDE 2.x**
 
-1. Install the `esp32` board package (Boards Manager URL from Espressif).
-2. Install libraries via Library Manager: `Adafruit GFX Library`, `Adafruit ST7735 and ST7789 Library`.
-3. Open `clawd_mochi/clawd_mochi.ino`, select board **ESP32C3 Dev Module** with:
-   - CPU Frequency: **160 MHz**
-   - USB CDC On Boot: **Enabled**
-   - Upload Speed: **921600**
-4. Flash the firmware.
+1. 安装 `esp32` 开发板包（Boards Manager 添加 Espressif 官方 URL）。
+2. 库管理器安装：`Adafruit GFX Library`、`Adafruit ST7735 and ST7789 Library`。
+3. 打开 `clawd_mochi/clawd_mochi.ino`，开发板选 **ESP32C3 Dev Module**，参数：
+   - CPU Frequency：**160 MHz**
+   - USB CDC On Boot：**Enabled**
+   - Upload Speed：**921600**
+4. 烧录固件即可。
 
-**Option B — arduino-cli**
+**方式二 —— arduino-cli**
 
 ```bash
 arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadSpeed=921600 clawd_mochi
-arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadSpeed=921600 -p COM<port> clawd_mochi
+arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadSpeed=921600 -p COM<端口> clawd_mochi
 ```
 
-No configuration file is required for a default build — the first boot starts the AP provisioning hotspot. There is no `#error` gate and no `wifi_config.h` to create.
+默认编译**不需要任何配置文件**，首次启动即为 AP 配网热点。没有 `#error` 拦截，也不需要创建 `wifi_config.h`。
 
-## Expressions
+## 表情一览
 
-15 expressions, driven from HTTP (`/cmd?k=<key>`) or the built-in web controller.
+15 种表情，可通过 HTTP（`/cmd?k=<key>`）或内置网页控制器触发。
 
-<p align="center"><img src="docs/images/expressions-overview.png" alt="All 15 expressions with names"></p>
+<p align="center"><img src="docs/images/expressions-overview.png" alt="全部 15 种表情与名称"></p>
 
-| # | Expression | Key | Alias | Frames | Frame period | Behavior | Typical use |
+| 序号 | 表情 | 按键 | 别名 | 帧数 | 帧周期 | 行为 | 适用场景 |
 | :-: | --- | :-: | :-: | :-: | :-: | --- | --- |
-| 1 | Normal | `w` | `normal` | 1 | — | persistent view, reacts to idle blink/glance | idle / standby |
-| 2 | Happy | `h` | `happy` | 1 | — | holds, auto-restores | praise / success |
-| 3 | Sleepy | `z` | `sleepy` | 2 | 600 ms | loops; dozing bars + rising `zZ` | late night / wind-down |
-| 4 | Surprised | `o` | `surprised` | 5 | 60 ms | one-shot shake, enlarged eyes | listening / startled |
-| 5 | Wink | `k` | `wink` | 1 | — | holds, auto-restores | playful moment |
-| 6 | Dizzy | `x` | `dizzy` | 5 | 60 ms | one-shot sway, `X X` eyes | error / stuck / confusion |
-| 7 | Angry | `g` | `angry` | 1 | — | holds, auto-restores | warning |
-| 8 | Heart | `l` | `heart` | 2 | 250 ms | loops, pulsing heart eyes | task success / reward |
-| 9 | Think | `t` | `think` | 4 | 140 ms | loops, flowing wave bars | analysis / reasoning |
-| 10 | Executing | `e` | `executing` | 3 | 200 ms | loops, both eyes erode inward | code running / tool call |
-| 11 | Crying | `c` | `crying` | 4 | 200 ms | loops, alternating teardrops | serious failure |
-| 12 | Shocked | `b` | `shocked` | 2 | 90 ms | loops, oversized jittering eyes | unexpected result |
-| 13 | Cool | `v` | `cool` | 2 | 350 ms | loops, sunglasses + moving glare | build passed / shipped |
-| 14 | Embarrassed | `m` | `embarrassed` | 2 | 400 ms | loops, averted gaze + blush | permission request / shy |
-| 15 | Delicious | `y` | `delicious` | 4 | 200 ms | loops, drooling drip | food / treats |
+| 1 | 普通 | `w` | `normal` | 1 | — | 常驻视图，受 Idle 眨眼/环视影响 | 空闲待机 |
+| 2 | 开心 | `h` | `happy` | 1 | — | 保持后自动恢复 | 回应夸奖 / 完成 |
+| 3 | 困倦 | `z` | `sleepy` | 2 | 600 ms | 循环，横条眼 + 上浮 zZ | 深夜 / 小憩 |
+| 4 | 惊讶 | `o` | `surprised` | 5 | 60 ms | 单次晃动，双眼放大 | 倾听 / 受惊 |
+| 5 | 眨眼 | `k` | `wink` | 1 | — | 保持后自动恢复 | 调皮互动 |
+| 6 | 晕眩 | `x` | `dizzy` | 5 | 60 ms | 单次摆动，X X 眼 | 错误 / 卡住 / 绕晕 |
+| 7 | 生气 | `g` | `angry` | 1 | — | 保持后自动恢复 | 警告 |
+| 8 | 爱心 | `l` | `heart` | 2 | 250 ms | 循环脉动心形眼 | 任务成功 / 赞美 |
+| 9 | 思考 | `t` | `think` | 4 | 140 ms | 循环，流动波浪条带 | 分析 / 思考 |
+| 10 | 执行中 | `e` | `executing` | 3 | 200 ms | 循环，双眼向内侵蚀 | 代码运行 / 工具调用 |
+| 11 | 哭泣 | `c` | `crying` | 4 | 200 ms | 循环，交替下落泪滴 | 任务严重失败 |
+| 12 | 震惊 | `b` | `shocked` | 2 | 90 ms | 循环，超大抖动双眼 | 意外结果 |
+| 13 | 墨镜 | `v` | `cool` | 2 | 350 ms | 循环，墨镜 + 移动反光 | 编译通过 / 完工 |
+| 14 | 害羞 | `m` | `embarrassed` | 2 | 400 ms | 循环，视线偏转 + 腮红 | 请求权限 / 羞涩 |
+| 15 | 馋嘴 | `y` | `delicious` | 4 | 200 ms | 循环，嘴角滴水 | 美食 / 奖励 |
 
-**Squeeze eyes (`s`)** — the classic `> <` view — is a **separate always-on view**, not part of the 15-expression set. It stays on screen until you switch away.
+**挤压眼（`s`）** —— 经典的 `> <` 视图 —— 是**独立常驻视图**，不计入 15 种表情；切换过去后会一直停留，直到手动切换。
 
-`/cmd?k=` accepts the single-letter keys above and the full-word aliases: `normal`, `happy`, `sleepy`, `surprised`, `wink`, `dizzy`, `angry`, `heart`, `think`, `executing`, `crying`, `shocked`, `cool`, `embarrassed`, `delicious`, `squish`. The key `n` silently restores normal eyes in the normal view; it does not leave the squish view. Unknown or empty keys return HTTP **400** `{"error":"unknown key"}`.
+`/cmd?k=` 接受上表的单字母按键与完整单词别名：`normal`、`happy`、`sleepy`、`surprised`、`wink`、`dizzy`、`angry`、`heart`、`think`、`executing`、`crying`、`shocked`、`cool`、`embarrassed`、`delicious`、`squish`；`n` 用于在普通视图静默恢复普通脸，不会退出挤压眼视图。未知或空 key 返回 HTTP **400** `{"error":"unknown key"}`。
 
-Temporary expressions auto-restore after 5 s (Think: 6 s). Pass `lease=<ms>` (500–1800000, i.e. up to 30 minutes) to hold longer. Normal eyes and squish ignore the lease.
+临时表情 5 秒后自动恢复（思考为 6 秒）；用 `lease=<ms>`（500~1800000，最长 30 分钟）可延长。普通眼与挤压眼不受 lease 影响。
 
 ## REST API
 
-Base URL: `http://192.168.4.1` (AP) or `http://clawd-mochi.local` / the DHCP address (STA). All endpoints below return JSON unless noted.
+访问地址：`http://192.168.4.1`（AP 模式）或 `http://clawd-mochi.local` / 路由器分配的 IP（STA 模式）。以下接口均返回 JSON（`/wifi` 页面除外）。
 
-| Endpoint | Purpose |
+| 接口 | 用途 |
 | --- | --- |
-| `/cmd?k=<key>` | Trigger an expression key or alias (see table above). Optional `lease=<ms>` (500–1800000) for temp expressions. HTTP 400 on an unknown key. |
-| `/eye?w=&h=&gap=&ox=&oy=` | Adjust eye width/height, center distance, and X/Y offset. Add `save=1` to persist to NVS; `reset=1` restores defaults. |
-| `/state` | Current expression, idle/backlight flags, eye geometry, animation speed, animation background (`bg`), WiFi mode (`ap`/`sta`), IP, hostname, RSSI (STA only), free heap. Sent with `Cache-Control: no-store`. |
-| `/wifi` | `GET` returns the provisioning form; `POST ssid=&pass=` saves credentials to NVS and reboots. Empty SSID returns HTTP 400. |
-| `/health` | `{"ok":true}` with `Cache-Control: no-store`. |
-| `/idle?on=1\|0` | Enable/disable the idle life machine (persisted immediately). |
-| `/speed?v=1\|2\|3` | Animation speed: 1 = slow (default), 2 = normal, 3 = fast. |
-| `/backlight?on=1\|0` | Screen backlight on/off. |
-| `/redraw?bg=<RRGGBB>` | Set animation background color and redraw. Invalid colors return HTTP 400. |
+| `/cmd?k=<key>` | 触发表情按键或别名（见上表）。临时表情可加 `lease=<ms>`（500~1800000）。未知 key 返回 HTTP 400。 |
+| `/eye?w=&h=&gap=&ox=&oy=` | 调节眼宽/眼高/眼距/水平偏移/垂直偏移。加 `save=1` 写入 NVS 持久化；`reset=1` 恢复默认。 |
+| `/state` | 当前表情、idle/背光状态、眼部几何参数、动画速度、动画背景色（`bg`）、WiFi 模式（`ap`/`sta`）、IP、hostname、RSSI（仅 STA 模式）、剩余堆内存；带 `Cache-Control: no-store`。 |
+| `/wifi` | `GET` 返回配网表单；`POST ssid=&pass=` 保存到 NVS 并重启。SSID 为空返回 HTTP 400。 |
+| `/health` | `{"ok":true}`，带 `Cache-Control: no-store`。 |
+| `/idle?on=1\|0` | 开/关 Idle 生命机能（立即持久化）。 |
+| `/speed?v=1\|2\|3` | 动画速度：1 = 慢（默认），2 = 正常，3 = 快。 |
+| `/backlight?on=1\|0` | 屏幕背光开/关。 |
+| `/redraw?bg=<RRGGBB>` | 设置动画背景色并立即重绘；非法颜色返回 HTTP 400。 |
 
-Example:
+示例：
 
 ```bash
 curl "http://192.168.4.1/cmd?k=crying"
@@ -113,32 +113,32 @@ curl "http://192.168.4.1/state"
 curl "http://192.168.4.1/health"
 ```
 
-## Drive it from Claude Code (example)
+## 接入 Claude Code 示例
 
-Any HTTP client can drive the face:
+任何 HTTP 客户端都能驱动表情：
 
 ```bash
-curl "http://192.168.4.1/cmd?k=e"   # executing
-curl "http://192.168.4.1/cmd?k=l"   # heart — all done
+curl "http://192.168.4.1/cmd?k=e"   # 执行中
+curl "http://192.168.4.1/cmd?k=l"   # 爱心 —— 全部完成
 ```
 
-`examples/clawd-notify.py` maps Claude Code hook events to faces. Suggested mapping (edit to taste):
+`examples/clawd-notify.py` 把 Claude Code 的 hook 事件映射为表情。推荐映射（可自行修改）：
 
-| Claude Code hook event | Key | Lease (ms) | Face |
+| Claude Code hook 事件 | 按键 | Lease (ms) | 表情 |
 | --- | :-: | ---: | --- |
-| `UserPromptSubmit` | `t` | 600000 | think |
-| `PreToolUse` | `e` | 1800000 | executing |
-| `PostToolUse` | `t` | 600000 | think |
-| `SubagentStart` | `t` | 600000 | think |
-| `SubagentStop` | `t` | 600000 | think |
-| `PostToolUseFailure` | `x` | — | dizzy |
-| `PermissionRequest` | `m` | 600000 | embarrassed |
-| `Notification` | `m` | 600000 | embarrassed |
-| `Stop` | `l` | — | heart |
-| `StopFailure` | `c` | — | crying |
-| `SessionEnd` | `n` | — | back to normal |
+| `UserPromptSubmit` | `t` | 600000 | 思考 |
+| `PreToolUse` | `e` | 1800000 | 执行中 |
+| `PostToolUse` | `t` | 600000 | 思考 |
+| `SubagentStart` | `t` | 600000 | 思考 |
+| `SubagentStop` | `t` | 600000 | 思考 |
+| `PostToolUseFailure` | `x` | — | 晕眩 |
+| `PermissionRequest` | `m` | 600000 | 害羞 |
+| `Notification` | `m` | 600000 | 害羞 |
+| `Stop` | `l` | — | 爱心 |
+| `StopFailure` | `c` | — | 哭泣 |
+| `SessionEnd` | `n` | — | 恢复普通 |
 
-Wire it into your Claude Code `settings.json` (`hooks` section), e.g. for every tool call:
+在 Claude Code 的 `settings.json`（`hooks` 段）中接入该脚本，例如每次工具调用时：
 
 ```json
 {
@@ -152,46 +152,47 @@ Wire it into your Claude Code `settings.json` (`hooks` section), e.g. for every 
 }
 ```
 
-The script defaults to `http://clawd-mochi.local`. If mDNS is unavailable, set `CLAWD_URL` to the device IP (for example `http://192.168.4.1` during first-boot AP provisioning). The script uses a 0.4 s network timeout; connection errors are ignored.
+脚本默认访问 `http://clawd-mochi.local`。如果 mDNS 不可用，设置环境变量 `CLAWD_URL` 为设备 IP（例如首次 AP 配网时的 `http://192.168.4.1`）。脚本使用 0.4 秒网络超时；连接错误直接忽略。
 
-## WiFi Modes
+## WiFi 模式
 
-**First boot / no saved credentials — provisioning hotspot.** The device starts in AP mode:
+**首次开机 / 无凭据 —— 配网热点。** 设备以 AP 模式启动：
 
-- SSID `ClaWD-Mochi`, password `clawd1234`, page at `http://192.168.4.1`
-- Open `http://192.168.4.1/wifi`, enter a 2.4 GHz SSID and password, and submit. Credentials are stored in NVS (`Preferences`, namespace `wifi`) and the device reboots.
+- SSID `ClaWD-Mochi`，密码 `clawd1234`，网页地址 `http://192.168.4.1`
+- 打开 `http://192.168.4.1/wifi`，填写 2.4GHz SSID 与密码并提交；凭据写入 NVS（`Preferences`，命名空间 `wifi`），随后设备自动重启。
 
-**After provisioning — home network (STA).** The device boots as a station, gets a DHCP address, and advertises `http://clawd-mochi.local` over mDNS. Boot waits up to 15 s for the connection; if it fails, the AP hotspot comes up in AP+STA mode and STA keeps retrying so you can re-provision.
+**配网后 —— 家庭局域网（STA）。** 设备以 station 模式启动、通过 DHCP 获取地址，并用 mDNS 广播 `http://clawd-mochi.local`。开机最多等待 15 秒；连接失败会以 AP+STA 模式拉起 AP 热点并继续重试，便于重新配网。
 
-**Runtime reconnect.** A 10 s watchdog calls `WiFi.reconnect()` on drop. The AP is only started at boot; if the router password changes while the device is running, reboot it to return to the boot fallback AP.
+**运行期重连。** 每 10 秒巡检一次，掉线调用 `WiFi.reconnect()`。AP 只在开机阶段拉起；如果运行中路由器密码变更，重启设备即可回到开机 AP 兜底。
 
-Notes: 2.4 GHz networks only; there is no static-IP configuration — the router's DHCP assigns the address; mDNS is best-effort and does not block boot if it fails.
+说明：仅支持 2.4GHz 网络；不再提供静态 IP 配置，地址由路由器 DHCP 分配；mDNS 为尽力而为，初始化失败不会阻塞启动。
 
-## Offline Preview (`preview.html`)
+## 离线预览器（`preview.html`）
 
-Double-click `preview.html` — a single-file HTML5 player with every expression pre-rendered frame-by-frame from the firmware. Play/pause, single-frame stepping, per-expression frame counts and periods. Completely local: no CDN, no build step, no network requests.
+双击 `preview.html` 即可 —— 单文件 HTML5 播放器，内置全部表情由固件逐帧渲染的结果。支持播放/暂停、单帧步进，并显示每种表情的帧数与周期。完全本地：无 CDN、无构建步骤、无网络请求。
 
-Note: frames are pre-generated PNG matrices, so they do not react to `/eye` geometry changes — for live geometry tuning use the `/eye` HTTP API.
+说明：预览帧为预生成 PNG 矩阵，不会响应 `/eye` 几何调整；需要实时调参请直接调用 `/eye` HTTP 接口。
 
-## Project Layout
+## 项目结构
 
 ```text
 clawd-mochi-plus/
 ├── clawd_mochi/
-│   └── clawd_mochi.ino        # complete firmware (single file)
+│   └── clawd_mochi.ino        # 完整固件（单文件）
 ├── examples/
-│   └── clawd-notify.py        # Claude Code hook → expression bridge (example)
-├── docs/images/               # README figures (rendered from firmware frames)
-├── preview.html               # offline expression frame player
-├── .github/workflows/compile.yml   # CI: compiles the firmware on every push
+│   └── clawd-notify.py        # Claude Code hook → 表情桥接（示例）
+├── docs/images/               # README 配图（由固件渲染帧生成）
+├── preview.html               # 离线表情逐帧预览器
+├── .github/workflows/compile.yml   # CI：每次推送自动编译固件
+├── AGENTS.md                  # 项目约定与架构说明（贡献者/AI 协作）
 ├── CHANGELOG.md
-├── LICENSE                    # MIT (original + Plus contributors)
-└── README.md / README_zh.md
+├── LICENSE                    # MIT（原作者 + Plus 贡献者）
+└── README.md / README_en.md   # 中文（默认）/ English
 ```
 
-## Credits & License
+## 致谢与许可
 
-- Original project: [yousifamanuel/clawd-mochi](https://github.com/yousifamanuel/clawd-mochi) — hardware design, base firmware, 3D case ([MakerWorld](https://makerworld.com/en/models/2559505-clawd-mochi-physical-claude-code-mascot#profileId-2820000)).
-- Clawd Mochi Plus: expression engine, adaptive geometry, idle state machine, STA-first WiFi with AP provisioning, offline preview.
+- 原项目：[yousifamanuel/clawd-mochi](https://github.com/yousifamanuel/clawd-mochi) —— 硬件方案、基础固件、3D 外壳（[MakerWorld](https://makerworld.com/en/models/2559505-clawd-mochi-physical-claude-code-mascot#profileId-2820000)）。
+- Clawd Mochi Plus：表情引擎、自适应几何、Idle 状态机、STA 优先 + AP 配网 WiFi、离线预览器。
 
-MIT — see [LICENSE](LICENSE).
+MIT 许可 —— 见 [LICENSE](LICENSE)。
