@@ -40,8 +40,8 @@ This project is an independent firmware enhancement derived from [yousifamanuel/
 
 **Option A — Arduino IDE 2.x**
 
-1. Install the `esp32` board package (Boards Manager URL from Espressif).
-2. Install libraries via Library Manager: `Adafruit GFX Library`, `Adafruit ST7735 and ST7789 Library`.
+1. Add Espressif's Boards Manager URL (`https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`) and install `esp32` **3.3.12**.
+2. Install `Adafruit GFX Library` **1.12.6** and `Adafruit ST7735 and ST7789 Library` **1.11.0** via Library Manager.
 3. Open `clawd_mochi/clawd_mochi.ino`, select board **ESP32C3 Dev Module** with:
    - CPU Frequency: **160 MHz**
    - USB CDC On Boot: **Enabled**
@@ -50,10 +50,15 @@ This project is an independent firmware enhancement derived from [yousifamanuel/
 
 **Option B — arduino-cli**
 
-```bash
+```powershell
+$env:ESP32_INDEX = "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json"
+arduino-cli core update-index --additional-urls $env:ESP32_INDEX
+arduino-cli core install esp32:esp32@3.3.12 --additional-urls $env:ESP32_INDEX
+arduino-cli lib install "Adafruit GFX Library@1.12.6" "Adafruit ST7735 and ST7789 Library@1.11.0"
 arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadSpeed=921600 clawd_mochi
-arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadSpeed=921600 -p COM<port> clawd_mochi
+arduino-cli upload --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadSpeed=921600 -p COM5 clawd_mochi
 ```
+Replace `COM5` with the serial port shown by your operating system.
 
 No configuration file is required for a default build — the first boot starts the AP provisioning hotspot. There is no `#error` gate and no `wifi_config.h` to create.
 
@@ -91,6 +96,8 @@ Temporary expressions auto-restore after 5 s (Think: 6 s). Pass `lease=<ms>` (50
 
 Base URL: `http://192.168.4.1` (AP) or `http://clawd-mochi.local` / the DHCP address (STA). All endpoints below return JSON unless noted.
 
+> Network scope: the HTTP control API has no authentication or encryption. Use it only on a trusted private network, and do not expose the device to the public internet. WiFi credentials are submitted through the HTTP provisioning form and stored in the device's NVS.
+
 | Endpoint | Purpose |
 | --- | --- |
 | `/cmd?k=<key>` | Trigger an expression key or alias (see table above). Optional `lease=<ms>` (500–1800000) for temp expressions. HTTP 400 on an unknown key. |
@@ -99,7 +106,7 @@ Base URL: `http://192.168.4.1` (AP) or `http://clawd-mochi.local` / the DHCP add
 | `/wifi` | `GET` returns the provisioning form; `POST ssid=&pass=` saves credentials to NVS and reboots. Empty SSID returns HTTP 400. |
 | `/health` | `{"ok":true}` with `Cache-Control: no-store`. |
 | `/idle?on=1\|0` | Enable/disable the idle life machine (persisted immediately). |
-| `/speed?v=1\|2\|3` | Animation speed: 1 = slow (default), 2 = normal, 3 = fast. |
+| `/speed?v=1\|2\|3` | Intro animation speed: 1 = slow (default), 2 = normal, 3 = fast. It does not change expression frame periods. |
 | `/backlight?on=1\|0` | Screen backlight on/off. |
 | `/redraw?bg=<RRGGBB>` | Set animation background color and redraw. Invalid colors return HTTP 400. |
 

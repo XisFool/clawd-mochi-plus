@@ -522,8 +522,12 @@ void restoreNormalEyes() {
   resetIdleTimers();
 }
 
-void noteActivity() {
+void noteBootRequest() {
   bootRequestSeen = true;
+}
+
+void noteActivity() {
+  noteBootRequest();
   if (napping) {
     napping = false;
     napStatic = false;
@@ -1194,11 +1198,13 @@ void routeRoot() {
 }
 
 void routeWifiPage() {
+  noteBootRequest();
   server.sendHeader("Cache-Control", "no-store");
   server.send_P(200, "text/html", WIFI_HTML);
 }
 
 void routeWifiSave() {
+  noteBootRequest();
   const String ssid = server.arg("ssid");
   const String pass = server.arg("pass");
   if (ssid.isEmpty()) {
@@ -1213,6 +1219,7 @@ void routeWifiSave() {
 }
 
 void routeHealth() {
+  noteBootRequest();
   server.sendHeader("Cache-Control", "no-store");
   server.send(200, "application/json", "{\"ok\":true}");
 }
@@ -1249,6 +1256,7 @@ bool lookupKey(const String &key, int8_t &action) {
 }
 
 void routeCmd() {
+  noteBootRequest();
   server.sendHeader("Cache-Control", "no-store");
   if (!server.hasArg("k") || server.arg("k").isEmpty()) {
     server.send(400, "application/json", "{\"error\":\"unknown key\"}");
@@ -1350,6 +1358,7 @@ void routeRedraw() {
 }
 
 void routeBacklight() {
+  noteBootRequest();
   server.sendHeader("Cache-Control", "no-store");
   if (!server.hasArg("on") ||
       (server.arg("on") != "0" && server.arg("on") != "1")) {
@@ -1372,6 +1381,7 @@ String rgb565ToHex(uint16_t c) {
 }
 
 void routeState() {
+  noteBootRequest();
   server.sendHeader("Cache-Control", "no-store");
   const bool staUp = WiFi.status() == WL_CONNECTED;
   String j;
@@ -1401,7 +1411,10 @@ void routeState() {
   server.send(200, "application/json", j);
 }
 
-void routeNotFound() { server.send(404, "text/plain", "not found"); }
+void routeNotFound() {
+  noteBootRequest();
+  server.send(404, "text/plain", "not found");
+}
 
 // ═════════════════════════════════════════════════════════════
 //  SETUP

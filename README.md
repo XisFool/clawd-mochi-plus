@@ -40,8 +40,8 @@
 
 **方式一 —— Arduino IDE 2.x**
 
-1. 安装 `esp32` 开发板包（Boards Manager 添加 Espressif 官方 URL）。
-2. 库管理器安装：`Adafruit GFX Library`、`Adafruit ST7735 and ST7789 Library`。
+1. 在 Boards Manager 添加 Espressif 官方 URL：`https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`，安装 `esp32` **3.3.12**。
+2. 库管理器安装 `Adafruit GFX Library` **1.12.6**、`Adafruit ST7735 and ST7789 Library` **1.11.0**。
 3. 打开 `clawd_mochi/clawd_mochi.ino`，开发板选 **ESP32C3 Dev Module**，参数：
    - CPU Frequency：**160 MHz**
    - USB CDC On Boot：**Enabled**
@@ -50,10 +50,15 @@
 
 **方式二 —— arduino-cli**
 
-```bash
+```powershell
+$env:ESP32_INDEX = "https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json"
+arduino-cli core update-index --additional-urls $env:ESP32_INDEX
+arduino-cli core install esp32:esp32@3.3.12 --additional-urls $env:ESP32_INDEX
+arduino-cli lib install "Adafruit GFX Library@1.12.6" "Adafruit ST7735 and ST7789 Library@1.11.0"
 arduino-cli compile --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadSpeed=921600 clawd_mochi
-arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadSpeed=921600 -p COM<端口> clawd_mochi
+arduino-cli upload --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadSpeed=921600 -p COM5 clawd_mochi
 ```
+将 `COM5` 替换为设备管理器中显示的串口号。
 
 默认编译**不需要任何配置文件**，首次启动即为 AP 配网热点。没有 `#error` 拦截，也不需要创建 `wifi_config.h`。
 
@@ -91,6 +96,8 @@ arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadS
 
 访问地址：`http://192.168.4.1`（AP 模式）或 `http://clawd-mochi.local` / 路由器分配的 IP（STA 模式）。以下接口均返回 JSON（`/wifi` 页面除外）。
 
+> 网络使用范围：HTTP 控制接口没有身份验证或加密，仅建议在可信的私人局域网中使用；不要将设备端口暴露到公网。WiFi 凭据通过 HTTP 配网页提交并保存在设备 NVS。
+
 | 接口 | 用途 |
 | --- | --- |
 | `/cmd?k=<key>` | 触发表情按键或别名（见上表）。临时表情可加 `lease=<ms>`（500~1800000）。未知 key 返回 HTTP 400。 |
@@ -99,7 +106,7 @@ arduino-cli upload  --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc,CPUFreq=160,UploadS
 | `/wifi` | `GET` 返回配网表单；`POST ssid=&pass=` 保存到 NVS 并重启。SSID 为空返回 HTTP 400。 |
 | `/health` | `{"ok":true}`，带 `Cache-Control: no-store`。 |
 | `/idle?on=1\|0` | 开/关 Idle 生命机能（立即持久化）。 |
-| `/speed?v=1\|2\|3` | 动画速度：1 = 慢（默认），2 = 正常，3 = 快。 |
+| `/speed?v=1\|2\|3` | 开场动画速度：1 = 慢（默认），2 = 正常，3 = 快；不改变表情动画的帧周期。 |
 | `/backlight?on=1\|0` | 屏幕背光开/关。 |
 | `/redraw?bg=<RRGGBB>` | 设置动画背景色并立即重绘；非法颜色返回 HTTP 400。 |
 

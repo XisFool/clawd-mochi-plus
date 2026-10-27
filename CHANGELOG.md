@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- README build steps now list the CI-verified ESP32 core and Adafruit
+  library versions.
+- `/speed` documentation now clarifies that it affects intro animations only.
+- README documents that the unauthenticated, unencrypted HTTP API is intended
+  for trusted private networks.
 - Web controller reduced to a minimal expression page: 15 expression buttons,
   AP/STA link status, backlight toggle, and a WiFi settings link.
 - `/cmd` uses an explicit key/alias table; unknown or empty keys return
@@ -34,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Any HTTP request received during the boot info page now dismisses it,
+  including status, WiFi, invalid command, and unknown-route requests.
 - WiFi now boots at 8.5 dBm TX power, re-applied after every `WiFi.mode()`
   switch (`setTxPower()` is a no-op before the radio starts). Cheap
   ESP32-C3 Super Mini boards emit a degraded spectrum at the default max
